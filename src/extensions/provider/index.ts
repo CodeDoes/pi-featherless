@@ -30,7 +30,7 @@ default: false,
         // Fetch available models from Featherless API
         const response = await fetch('https://api.featherless.ai/v1/models', {
           headers: {
-            'Authorization': `Bearer ${process.env.FEATHERLESS_API_KEY}`,
+            'Authorization': `Bearer ${credentials.access}`,
           },
         });
         if (!response.ok) throw new Error('Failed to fetch models');
