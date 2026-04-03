@@ -46,10 +46,10 @@ src/
 
 ## Conventions
 
-- API key comes from environment (`SYNTHETIC_API_KEY`)
+- API key comes from environment (``)
 - Provider uses OpenAI-compatible API at `https://api.featherless.ai/v1`
 - Models are hardcoded in `src/extensions/provider/models.ts`
-- Quotas command only registered when `SYNTHETIC_API_KEY` is present
+- Quotas command only registered when `` is present
 
 ## Model Configuration
 

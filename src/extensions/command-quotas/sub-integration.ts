@@ -61,31 +61,30 @@ function toUsageSnapshot(quotas: QuotasResponse): UsageSnapshot {
   }
 
   return {
-    provider: "synthetic",
-    displayName: "Synthetic",
+    provider: "featherless",
+    displayName: "Featherless",
     windows,
     lastSuccessAt: Date.now(),
   };
 }
 
-async function emitCurrentUsage(pi: ExtensionAPI): Promise<void> {
-  const quotas = await fetchQuotas();
+async function emitCurrentUsage(pi: ExtensionAPI, apiKey: string): Promise<void> {
+  const quotas = await fetchQuotas(apiKey);
   if (!quotas) return;
   pi.events.emit("sub-core:update-current", {
-    state: { provider: "synthetic", usage: toUsageSnapshot(quotas) },
+    state: { provider: "featherless", usage: toUsageSnapshot(quotas) },
   });
 }
 
-export function registerSubIntegration(pi: ExtensionAPI): void {
-  if (!process.env.SYNTHETIC_API_KEY) return;
+export function registerSubIntegration(pi: ExtensionAPI, apiKey: string): void {
 
   let interval: NodeJS.Timeout | undefined;
   let refreshMs = 60000;
   let subCoreReady = false;
   let currentProvider: string | undefined;
 
-  function isSynthetic(): boolean {
-    return currentProvider === "synthetic";
+  function isFeatherless(): boolean {
+    return currentProvider === "featherless";
   }
 
   function stop(): void {
@@ -97,13 +96,13 @@ export function registerSubIntegration(pi: ExtensionAPI): void {
 
   function start(): void {
     stop();
-    if (!subCoreReady || !isSynthetic()) {
+    if (!subCoreReady || !isFeatherless()) {
       return;
     }
-    emitCurrentUsage(pi);
+    emitCurrentUsage(pi, apiKey);
     const ms = Math.max(10000, refreshMs);
     interval = setInterval(() => {
-      if (isSynthetic()) emitCurrentUsage(pi);
+      if (isFeatherless()) emitCurrentUsage(pi, apiKey);
     }, ms);
     interval.unref?.();
   }
@@ -130,8 +129,8 @@ export function registerSubIntegration(pi: ExtensionAPI): void {
 
   pi.on("model_select", (event, _ctx) => {
     currentProvider = event.model?.provider;
-    if (isSynthetic()) {
-      emitCurrentUsage(pi);
+    if (isFeatherless()) {
+      emitCurrentUsage(pi, apiKey);
       start();
     } else {
       stop();

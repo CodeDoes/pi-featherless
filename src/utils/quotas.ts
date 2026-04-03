@@ -1,13 +1,13 @@
 import type { QuotasResponse } from "../types/quotas";
 
-const API_KEY = process.env.SYNTHETIC_API_KEY;
 
-export async function fetchQuotas(): Promise<QuotasResponse | null> {
-  if (!API_KEY) return null;
+
+export async function fetchQuotas(apiKey: string): Promise<QuotasResponse | null> {
+  if (!apiKey) return null;
 
   try {
-    const response = await fetch("https://api.synthetic.new/v2/quotas", {
-      headers: { Authorization: `Bearer ${API_KEY}` },
+    const response = await fetch("https://api.featherless.ai/v1/quotas", {
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
 
     if (!response.ok) return null;

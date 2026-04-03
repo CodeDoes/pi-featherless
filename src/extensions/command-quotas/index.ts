@@ -10,5 +10,5 @@ export default async function (pi: ExtensionAPI) {
   }
 
   registerQuotasCommand(pi);
-  registerSubIntegration(pi);
+  registerSubIntegration(pi, storedCredentials.access);
 }

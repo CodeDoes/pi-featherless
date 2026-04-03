@@ -2,14 +2,14 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { fetchQuotas } from "../../utils/quotas";
 import { QuotasComponent } from "./components/quotas-display";
 
-export function registerQuotasCommand(pi: ExtensionAPI): void {
+export function registerQuotasCommand(pi: ExtensionAPI, apiKey: string): void {
   pi.registerCommand("featherless:quotas", {
     description: "Display Featherless API usage quotas",
     handler: async (_args, ctx) => {
       const result = await ctx.ui.custom<null>((tui, theme, _kb, done) => {
         const component = new QuotasComponent(theme, () => done(null));
 
-        fetchQuotas()
+        fetchQuotas(apiKey)
           .then((quotas) => {
             if (!quotas) {
               component.setState({
@@ -38,7 +38,7 @@ export function registerQuotasCommand(pi: ExtensionAPI): void {
 
       // RPC fallback: return JSON
       if (result === undefined) {
-        const quotas = await fetchQuotas();
+        const quotas = await fetchQuotas(apiKey);
         if (!quotas) {
           ctx.ui.notify(
             JSON.stringify({ error: "Failed to fetch quotas" }),
