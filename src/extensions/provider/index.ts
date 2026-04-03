@@ -45,7 +45,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       compat: {
         supportsDeveloperRole: false,
         maxTokensField: "max_tokens",
-        supportsToolCalls: true,
+        supportsToolCalls: model.id.includes("Qwen3") || model.id === "moonshotai/Kimi-K2-Instruct",
       },
     }));
 
