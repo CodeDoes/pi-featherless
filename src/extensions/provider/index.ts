@@ -45,7 +45,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       compat: {
         supportsDeveloperRole: false,
         maxTokensField: "max_tokens",
-        supportsToolCalls: model.supported_features?.includes("function_calling") || false,
+        supportsToolCalls: true,
       },
     }));
 
