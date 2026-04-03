@@ -29,7 +29,8 @@ default: false,
     if (isAuthenticated) {
       try {
         // Fetch available models from Featherless API
-        const response = await fetch('https://api.featherless.ai/v1/models', {
+        const url = showAllPlans ? 'https://api.featherless.ai/v1/models' : 'https://api.featherless.ai/v1/models?available_on_current_plan=0';
+        const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${credentials.access}`,
           },
@@ -42,7 +43,6 @@ default: false,
         const filteredModels = FEATHERLESS_MODELS.filter((m) => {
           if (!availableIds.has(m.id)) return false;
           if (m.isGated && !showGated) return false;
-          if (m.availableOnPlan === false && !showAllPlans) return false;
           return true;
         });
 
@@ -67,7 +67,6 @@ default: false,
         // Fallback to hardcoded if fetch fails
         const filteredModels = FEATHERLESS_MODELS.filter((m) => {
           if (m.isGated && !showGated) return false;
-          if (m.availableOnPlan === false && !showAllPlans) return false;
           return true;
         });
 
