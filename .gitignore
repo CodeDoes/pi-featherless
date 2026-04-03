@@ -36,6 +36,10 @@ result-*
 # Husky
 .husky/_
 
-# Pi
-.pi/git
-.pi/npm
+# Pi session data
+.pi/
+
+# Test files
+demo_output.ts
+pi_integration_test.ts
+test_api.ts

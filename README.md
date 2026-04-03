@@ -20,14 +20,6 @@ You can use the built-in login command to securely provide your API key:
 
 Select **Featherless AI** from the menu and enter your key.
 
-### Set Environment Variables (Optional)
-
-Alternatively, you can use environment variables:
-
-```bash
-export FEATHERLESS_API_KEY="your-api-key-here"
-# Optional: Set concurrency slot for priority access
-export FEATHERLESS_CONCURRENCY_SLOT="your-slot-id"
 ```
 
 ## Concurrency Slots
@@ -112,7 +104,6 @@ This repository uses [Changesets](https://github.com/changesets/changesets) for 
 ## Requirements
 
 - Pi coding agent v0.50.0+
-- FEATHERLESS_API_KEY environment variable
 
 ## Links</parameter
 
