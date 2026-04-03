@@ -1,0 +1,76 @@
+{
+  "name": "@aliou/pi-synthetic",
+  "version": "0.8.5",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aliou/pi-synthetic"
+  },
+  "pi": {
+    "extensions": [
+      "./src/extensions/provider/index.ts",
+      "./src/extensions/web-search/index.ts",
+      "./src/extensions/command-quotas/index.ts"
+    ],
+    "video": "https://assets.aliou.me/pi-extensions/demos/pi-synthetic.mp4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "0.61.0",
+    "@mariozechner/pi-tui": "0.61.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check",
+    "format": "biome check --write",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:lockfile": "pnpm install --frozen-lockfile --ignore-scripts",
+    "prepare": "[ -d .git ] && husky || true",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm changeset publish"
+  },
+  "dependencies": {
+    "@aliou/pi-utils-ui": "^0.1.2"
+  },
+  "devDependencies": {
+    "@aliou/biome-plugins": "^0.3.2",
+    "@biomejs/biome": "^2.4.2",
+    "@changesets/cli": "^2.27.11",
+    "@mariozechner/pi-coding-agent": "0.61.0",
+    "@sinclair/typebox": "^0.34.48",
+    "@types/node": "^25.0.10",
+    "husky": "^9.1.7",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "pnpm": {
+    "overrides": {
+      "@mariozechner/pi-ai": "$@mariozechner/pi-coding-agent",
+      "@mariozechner/pi-tui": "$@mariozechner/pi-coding-agent"
+    }
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    },
+    "@mariozechner/pi-tui": {
+      "optional": true
+    }
+  },
+  "packageManager": "pnpm@10.26.1"
+}
