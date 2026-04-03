@@ -1,106 +1,57 @@
 import { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { FEATHERLESS_MODELS } from "./models";
+
+interface FeatherlessApiModel {
+  id: string;
+  is_gated: boolean;
+  context_length: number;
+  max_completion_tokens?: number;
+  // other fields
+}
+
+async function fetchFeatherlessModels(): Promise<FeatherlessApiModel[]> {
+  const response = await fetch("https://api.featherless.ai/v1/models");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch models: ${response.status}`);
+  }
+  return response.json();
+}
 
 export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<void> {
   const providerId = "featherless";
 
-  // Register flags to control model visibility
-  pi.registerFlag("featherless:show-gated", {
-    description: "Show gated models in the Featherless provider",
-    type: "boolean",
-    default: false,
-  });
-
-  pi.registerFlag("featherless:show-all-plans", {
-    description: "Show models not available on the current plan",
-default: false,
-});
-
   const registerModels = async () => {
-    const storedCredentials = pi.auth?.credentials?.[providerId];
-    const credentials = storedCredentials;
-    const isAuthenticated = !!credentials;
-
-    // Check both CLI flags and environment variables for settings
-    const showGated = pi.getFlag("featherless:show-gated") || process.env.FEATHERLESS_SHOW_GATED === "true";
-    const showAllPlans = pi.getFlag("featherless:show-all-plans") || process.env.FEATHERLESS_SHOW_ALL_PLANS === "true";
-
-    let models: any[] = [];
-    if (isAuthenticated) {
-      try {
-        // Fetch available models from Featherless API
-        const url = showAllPlans ? 'https://api.featherless.ai/v1/models' : 'https://api.featherless.ai/v1/models?available_on_current_plan=0';
-        const response = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${credentials.access}`,
-          },
-        });
-        if (!response.ok) throw new Error('Failed to fetch models');
-        const apiModels: { id: string }[] = await response.json();
-
-        // Filter and map using hardcoded config
-        const availableIds = new Set(apiModels.map(m => m.id));
-        const filteredModels = FEATHERLESS_MODELS.filter((m) => {
-          if (!availableIds.has(m.id)) return false;
-          if (m.isGated && !showGated) return false;
-          return true;
-        });
-
-        models = filteredModels.map((model) => ({
-          id: model.id,
-          name: model.isGated ? `${model.name} (Gated)` : model.name,
-          reasoning: model.reasoning,
-          input: model.input,
-          cost: model.cost,
-          contextWindow: model.contextWindow,
-          maxTokens: model.maxTokens,
-          compat: {
-            supportsDeveloperRole: false,
-            tools: model.id === "moonshotai/Kimi-K2-Instruct" || model.id.startsWith("Qwen/Qwen3"),
-            vision: model.id.startsWith("google/gemma-3") || model.id.startsWith("mistralai/Mistral"),
-            maxTokensField: "max_tokens",
-            ...model.compat,
-          },
-        }));
-      } catch (error) {
-        console.error('[Featherless] Failed to fetch models:', error);
-        // Fallback to hardcoded if fetch fails
-        const filteredModels = FEATHERLESS_MODELS.filter((m) => {
-          if (m.isGated && !showGated) return false;
-          return true;
-        });
-
-        models = filteredModels.map((model) => ({
-          id: model.id,
-          name: model.isGated ? `${model.name} (Gated)` : model.name,
-          reasoning: model.reasoning,
-          input: model.input,
-          cost: model.cost,
-          contextWindow: model.contextWindow,
-          maxTokens: model.maxTokens,
-          compat: {
-            supportsDeveloperRole: false,
-            tools: model.id === "moonshotai/Kimi-K2-Instruct" || model.id.startsWith("Qwen/Qwen3"),
-            vision: model.id.startsWith("google/gemma-3") || model.id.startsWith("mistralai/Mistral"),
-            maxTokensField: "max_tokens",
-            ...model.compat,
-          },
-        }));
-      }
-    }
+    const apiModels = await fetchFeatherlessModels();
+    const models = apiModels.map((model) => ({
+      id: model.id,
+      name: model.id.split('/')[1] || model.id,
+      reasoning: false,
+      input: ["text"] as const,
+      cost: {
+        input: 0.1,
+        output: 0.1,
+        cacheRead: 0.1,
+        cacheWrite: 0,
+      },
+      contextWindow: model.context_length,
+      maxTokens: model.max_completion_tokens || 4096,
+      compat: {
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+      },
+    }));
 
     pi.registerProvider(providerId, {
       baseUrl: "https://api.featherless.ai/v1",
       api: "openai-completions",
       headers: {
+        "Content-Type": "application/json",
         "HTTP-Referer": "https://pi.dev",
-        "X-Title": "@codedoes/pi-featherless",
+        "X-Title": "Pi Coding Agent",
       },
       models,
       oauth: {
         name: "Featherless",
         async login(callbacks) {
-          callbacks.onAuth({ url: "https://featherless.ai/account/api-keys" });
           const key = await callbacks.onPrompt({
             message: "Enter your Featherless API key:",
             placeholder: "sk-...",
@@ -121,12 +72,7 @@ default: false,
     });
   };
 
-  // Initial registration
   return registerModels();
-
-  // Re-register models on auth change
-  
-  // Inject concurrency slot into headers if provided via login or env
 }
 
 export default async function (pi: ExtensionAPI) {

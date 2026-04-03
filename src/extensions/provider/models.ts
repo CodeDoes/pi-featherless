@@ -44,23 +44,7 @@ export const FEATHERLESS_MODELS: FeatherlessModelConfig[] = [
     contextWindow: 32768,
     maxTokens: 8192,
     isGated: false,
-  },
-  {
-    id: "mistralai/Mistral-7B-Instruct-v0.2",
-    name: "Mistral 7B Instruct v0.2",
-    reasoning: false,
-    input: ["text"],
-    cost: {
-      input: 0.1,
-      output: 0.1,
-      cacheRead: 0.1,
-      cacheWrite: 0,
-    },
-    contextWindow: 32768,
-    maxTokens: 4096,
-    isGated: false,
-  },
-  {
+
     id: "google/gemma-7b",
     name: "Gemma 7B",
     reasoning: false,
@@ -89,21 +73,5 @@ export const FEATHERLESS_MODELS: FeatherlessModelConfig[] = [
     contextWindow: 128000,
     maxTokens: 4096,
     isGated: false,
-  },
-  {
-    id: "mistralai/Mistral-Large-Instruct-2407",
-    name: "Mistral Large Instruct (Pro Only)",
-    reasoning: false,
-    input: ["text"],
-    cost: {
-      input: 0.5,
-      output: 0.5,
-      cacheRead: 0.5,
-      cacheWrite: 0,
-    },
-    contextWindow: 128000,
-    maxTokens: 8192,
-    isGated: false,
-    availableOnPlan: false,
   },
 ];
