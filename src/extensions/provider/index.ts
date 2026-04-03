@@ -31,7 +31,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
     const models = apiModels.filter(m => m.id.startsWith("Qwen/") || m.id === "moonshotai/Kimi-K2-Instruct").map((model) => ({
       id: model.id,
       name: model.id.split('/')[1] || model.id,
-      reasoning: false,
+      reasoning: model.id.startsWith("Qwen/") ? true : false,
       input: ["text"] as ("text" | "image")[],
       cost: {
         input: 0.1,
@@ -44,6 +44,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       compat: {
         supportsDeveloperRole: false,
         maxTokensField: "max_tokens",
+        supportsToolCalls: true,
       },
     }));
 
