@@ -26,6 +26,9 @@ pnpm changeset    # Create changeset for versioning
 src/
   extensions/
     provider/
+    command-tokenize/
+      index.ts                  # Tokenize command extension entry point
+      command.ts                # `featherless:tokenize` command for token counting
       index.ts                  # Provider extension entry point
       models.ts                 # Hardcoded model definitions
       models.test.ts            # Model config tests
@@ -48,11 +51,17 @@ src/
 - API key comes from environment (``)
 - Provider uses OpenAI-compatible API at `https://api.featherless.ai/v1`
 - Models are hardcoded in `src/extensions/provider/models.ts`
+    command-tokenize/
+      index.ts                  # Tokenize command extension entry point
+      command.ts                # `featherless:tokenize` command for token counting
 - Quotas command only registered when `` is present
 
 ## Model Configuration
 
 Models are defined in `src/extensions/provider/models.ts` with the following structure:
+    command-tokenize/
+      index.ts                  # Tokenize command extension entry point
+      command.ts                # `featherless:tokenize` command for token counting
 
 ```typescript
 {
@@ -83,6 +92,9 @@ Get pricing from `https://api.featherless.ai/v1/models`.
 ## Adding Models
 
 Edit `src/extensions/provider/models.ts` and append to `FEATHERLESS_MODELS` array.
+    command-tokenize/
+      index.ts                  # Tokenize command extension entry point
+      command.ts                # `featherless:tokenize` command for token counting
 
 ## Versioning
 
