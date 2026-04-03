@@ -2,35 +2,40 @@
 
 A cool Pi extension that adds [Featherless.ai](https://featherless.ai) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
 
+This project is a fork of `pi-synthetic` by Aliou, adapted specifically for Featherless AI.
+
 ## Installation
 
 ### Get API Key
 
 Sign up at [featherless.ai](https://featherless.ai) to get an API key.
 
-### Set Environment Variable
+### Login
+
+You can use the built-in login command to securely provide your API key:
+
+```bash
+/login
+```
+
+Select **Featherless AI** from the menu and enter your key.
+
+### Set Environment Variable (Optional)
+
+Alternatively, you can use an environment variable:
 
 ```bash
 export FEATHERLESS_API_KEY="your-api-key-here"
 ```
 
-Add to shell profile for persistence:
-
-```bash
-echo 'export FEATHERLESS_API_KEY="your-api-key-here"' >> ~/.zshrc
-```
-
 ### Install Extension
 
 ```bash
-# From npm
-pi install npm:@aliou/pi-featherless
-
 # From git
-pi install git:github.com/aliou/pi-featherless
+pi install git:github.com/kit/pi-featherless
 
 # Local development
-pi -e ./src/index.ts
+pi -e ./src/extensions/provider/index.ts
 ```
 
 ## Usage
@@ -54,7 +59,7 @@ Models are hardcoded in `src/providers/models.ts`. To add or update models:
 ### Setup
 
 ```bash
-git clone https://github.com/aliou/pi-featherless.git
+git clone https://github.com/kit/pi-featherless.git
 cd pi-featherless
 
 # Install dependencies (sets up pre-commit hooks)

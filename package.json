@@ -1,5 +1,5 @@
 {
-  "name": "@aliou/pi-featherless",
+  "name": "@kit/pi-featherless",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -11,13 +11,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/aliou/pi-featherless"
+    "url": "https://github.com/kit/pi-featherless"
   },
   "pi": {
     "extensions": [
       "./src/extensions/provider/index.ts"
-    ],
-    "video": "https://assets.aliou.me/pi-extensions/demos/pi-featherless.mp4"
+    ]
   },
   "publishConfig": {
     "access": "public"
