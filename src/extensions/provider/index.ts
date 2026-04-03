@@ -5,6 +5,7 @@ interface FeatherlessApiModel {
   is_gated: boolean;
   context_length: number;
   max_completion_tokens?: number;
+  supported_features?: string[];
   // other fields
 }
 
@@ -44,7 +45,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       compat: {
         supportsDeveloperRole: false,
         maxTokensField: "max_tokens",
-        supportsToolCalls: model.id.startsWith("Qwen/") || model.id === "moonshotai/Kimi-K2-Instruct" ? true : false,
+        supportsToolCalls: model.supported_features?.includes("function_calling") || false,
       },
     }));
 
