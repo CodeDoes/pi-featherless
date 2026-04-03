@@ -38,7 +38,7 @@ This extension supports the `X-Featherless-Concurrency-Slot` header. If you have
 
 ```bash
 # From git
-pi install git:github.com/kit/pi-featherless
+pi install git:github.com/Codedoes/pi-featherless
 
 # Local development
 pi -e ./src/extensions/provider/index.ts
@@ -65,7 +65,7 @@ Models are hardcoded in `src/providers/models.ts`. To add or update models:
 ### Setup
 
 ```bash
-git clone https://github.com/kit/pi-featherless.git
+git clone https://github.com/Codedoes/pi-featherless.git
 cd pi-featherless
 
 # Install dependencies (sets up pre-commit hooks)
@@ -114,8 +114,11 @@ This repository uses [Changesets](https://github.com/changesets/changesets) for 
 - Pi coding agent v0.50.0+
 - FEATHERLESS_API_KEY environment variable
 
-## Links
+## Links</parameter
 
 - [Featherless.ai](https://featherless.ai)
 - [Featherless API Docs](https://featherless.ai/docs)
 - [Pi Documentation](https://buildwithpi.ai/)
+---
+
+*This project was developed with the assistance of GitHub Copilot.*
