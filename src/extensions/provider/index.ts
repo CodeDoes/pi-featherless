@@ -8,7 +8,8 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
     api: "openai-completions",
     headers: {
       Referer: "https://pi.dev",
-      "X-Title": "npm:@aliou/pi-featherless",
+      "X-Title": "@kit/pi-featherless",
+      "X-Concurrency-Slot": "FEATHERLESS_CONCURRENCY_SLOT",
     },
     models: FEATHERLESS_MODELS.map((model) => ({
       id: model.id,
@@ -32,7 +33,15 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
           message: "Enter your Featherless API key:",
           placeholder: "sk-...",
         });
-        return { access: key, refresh: key, expires: Date.now() + 365 * 24 * 60 * 60 * 1000 };
+        const slot = await callbacks.onPrompt({
+          message: "Enter your Concurrency Slot (optional):",
+          placeholder: "1",
+        });
+        return {
+          access: key,
+          refresh: slot || "1",
+          expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
+        };
       },
       async refreshToken(credentials) {
         return credentials;
@@ -41,6 +50,21 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
         return credentials.access;
       },
     },
+  });
+
+  // Inject concurrency slot into headers if provided via login or env
+  pi.on("before_provider_request", (event, ctx) => {
+    if (event.model.provider !== "featherless") return;
+
+    const credentials = (pi as any).getCredentials?.("featherless");
+    const slot = credentials?.refresh || process.env.FEATHERLESS_CONCURRENCY_SLOT;
+
+    if (slot) {
+      event.payload.headers = {
+        ...event.payload.headers,
+        "X-Concurrency-Slot": slot,
+      };
+    }
   });
 }
 
