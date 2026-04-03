@@ -7,7 +7,7 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
     apiKey: "FEATHERLESS_API_KEY",
     api: "openai-completions",
     headers: {
-      Referer: "https://pi.dev",
+      "HTTP-Referer": "https://pi.dev",
       "X-Title": "@kit/pi-featherless",
     },
     models: FEATHERLESS_MODELS.map((model) => ({
@@ -51,7 +51,7 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
   pi.on("before_provider_request", (event, _ctx) => {
     if (event.model.provider !== "featherless") return;
 
-    // Try to get slot from env or from the 'refresh' field we used in oauth login
+    // Try to get slot from env
     const slot = process.env.FEATHERLESS_CONCURRENCY_SLOT;
 
     if (slot) {
