@@ -28,10 +28,6 @@
     "src",
     "README.md"
   ],
-  "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "0.61.0",
-    "@mariozechner/pi-tui": "0.61.0"
-  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
@@ -70,10 +66,6 @@
       "esbuild"
     ]
   },
-  "peerDependenciesMeta": {
-    "@mariozechner/pi-coding-agent": {
-      "optional": true
-    },
     "@mariozechner/pi-tui": {
       "optional": true
     }
