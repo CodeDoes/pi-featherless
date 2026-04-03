@@ -44,9 +44,6 @@
     "@aliou/pi-utils-ui": "^0.1.2",
     "@codedoes/pi-featherless": "link:"
   },
-  "optionalDependencies": {
-    "@mariozechner/pi-ai": "link:../pi-mono/packages/ai"
-  },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
     "@mariozechner/pi-coding-agent": "link:../pi-mono/packages/coding-agent",
@@ -65,10 +62,6 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
-  },
-    "@mariozechner/pi-tui": {
-      "optional": true
-    }
   },
   "packageManager": "pnpm@10.26.1"
 }

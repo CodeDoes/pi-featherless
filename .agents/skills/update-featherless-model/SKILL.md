@@ -1,9 +1,9 @@
 ---
-name: update-synthetic-model
-description: Update model metadata for the pi-synthetic extension. Use when adding or refreshing entries in src/providers/models.ts, especially to verify pricing, context, max tokens, input modalities, and reasoning support from Synthetic, then compare against models.dev for the synthetic provider and, if absent there, compare against other providers for the same model.
+name: update-featherless-model
+description: Update model metadata for the pi-featherless extension. Use when adding or refreshing entries in src/providers/models.ts, especially to verify pricing, context, max tokens, input modalities, and reasoning support from Featherless, then compare against models.dev for the featherless provider and, if absent there, compare against other providers for the same model.
 ---
 
-# Update Synthetic model
+# Update Featherless model
 
 Update `src/providers/models.ts` from live data, not guesswork.
 
@@ -11,16 +11,16 @@ Update `src/providers/models.ts` from live data, not guesswork.
 
 Use these in order:
 
-1. Synthetic models endpoint: `https://api.synthetic.new/openai/v1/models`
-2. Synthetic runtime behavior: direct `chat/completions` calls
-3. `https://models.dev/api.json` under `.synthetic.models`
-4. If a model is missing on models.dev for `synthetic`, inspect the same model under other providers on models.dev for likely `input` and `reasoning` defaults, then confirm with Synthetic runtime calls when possible.
+1. Featherless models endpoint: `https://api.featherless.ai/v1/models`
+2. Featherless runtime behavior: direct `chat/completions` calls
+3. `https://models.dev/api.json` under `.featherless.models`
+4. If a model is missing on models.dev for `featherless`, inspect the same model under other providers on models.dev for likely `input` and `reasoning` defaults, then confirm with Featherless runtime calls when possible.
 
 ## Update flow
 
 1. Read `src/providers/models.ts`.
-2. Query Synthetic models endpoint with `bash` + `jq`.
-3. Copy over fields Synthetic explicitly exposes:
+2. Query Featherless models endpoint with `bash` + `jq`.
+3. Copy over fields Featherless explicitly exposes:
    - `id`
    - `name`
    - `context_length` -> `contextWindow`
@@ -29,33 +29,33 @@ Use these in order:
    - `pricing.input_cache_reads` -> `cost.cacheRead` per 1M
    - `pricing.input_cache_writes` -> `cost.cacheWrite` per 1M
    - `input_modalities` -> `input`
-4. Compare the same model against `models.dev` synthetic entry.
-5. If `models.dev` has a Synthetic entry, use it to cross-check:
+4. Compare the same model against `models.dev` featherless entry.
+5. If `models.dev` has a Featherless entry, use it to cross-check:
    - `reasoning`
    - `modalities.input`
    - output limit / max tokens
-6. If `models.dev` does not yet list that model for Synthetic:
+6. If `models.dev` does not yet list that model for Featherless:
    - inspect the same model on other providers in `models.dev`
    - use that only as supporting evidence for `input` / `reasoning`
-   - then manually test Synthetic runtime behavior before changing `reasoning` or multimodal input
-7. If Synthetic metadata and runtime disagree, prefer confirmed runtime behavior, but note the discrepancy in a comment or commit message.
+   - then manually test Featherless runtime behavior before changing `reasoning` or multimodal input
+7. If Featherless metadata and runtime disagree, prefer confirmed runtime behavior, but note the discrepancy in a comment or commit message.
 8. Review whether the model needs a `compat` override. Do not add compat fields by default. Add them only when a live request or provider docs show a request-shaping quirk.
 
 ## Required commands
 
-### 1) Synthetic models endpoint
+### 1) Featherless models endpoint
 
 Use `bash` + `jq`, example:
 
 ```bash
-curl -s https://api.synthetic.new/openai/v1/models \
-  | jq '.data[] | select(.id=="hf:zai-org/GLM-4.7-Flash")'
+curl -s https://api.featherless.ai/v1/models \
+  | jq '.data[] | select(.id=="Qwen/Qwen2.5-Coder-32B-Instruct")'
 ```
 
 Useful narrow query:
 
 ```bash
-curl -s https://api.synthetic.new/openai/v1/models \
+curl -s https://api.featherless.ai/v1/models \
   | jq '.data[] | select(.id==$id) | {
       id,
       name,
@@ -64,24 +64,24 @@ curl -s https://api.synthetic.new/openai/v1/models \
       context_length,
       pricing,
       supported_features
-    }' --arg id 'hf:zai-org/GLM-4.7-Flash'
+    }' --arg id 'Qwen/Qwen2.5-Coder-32B-Instruct'
 ```
 
-### 2) models.dev synthetic comparison
+### 2) models.dev featherless comparison
 
-Check Synthetic provider entry:
+Check Featherless provider entry:
 
 ```bash
 curl -sL -A 'Mozilla/5.0' https://models.dev/api.json \
-  | jq '.synthetic.models["hf:zai-org/GLM-4.7"]'
+  | jq '.featherless.models["Qwen/Qwen2.5-Coder-32B-Instruct"]'
 ```
 
-If missing under Synthetic, inspect other providers:
+If missing under Featherless, inspect other providers:
 
 ```bash
 curl -sL -A 'Mozilla/5.0' https://models.dev/api.json \
   | jq 'to_entries
-    | map({provider: .key, model: .value.models["hf:zai-org/GLM-4.7-Flash"]})
+    | map({provider: .key, model: .value.models["Qwen/Qwen2.5-Coder-32B-Instruct"]})
     | map(select(.model != null))
     | map({provider, reasoning: .model.reasoning, input: .model.modalities.input})'
 ```
@@ -90,19 +90,19 @@ curl -sL -A 'Mozilla/5.0' https://models.dev/api.json \
 
 Do not rely only on metadata for `reasoning` or multimodal support.
 
-Use the environment variable `SYNTHETIC_API_KEY`. Never print it.
+Use the environment variable `FEATHERLESS_API_KEY`. Never print it.
 
 ### Reasoning check
 
 Send a minimal request with `reasoning_effort`:
 
 ```bash
-curl -sS https://api.synthetic.new/openai/v1/chat/completions \
-  -H "Authorization: Bearer $SYNTHETIC_API_KEY" \
+curl -sS https://api.featherless.ai/v1/chat/completions \
+  -H "Authorization: Bearer $FEATHERLESS_API_KEY" \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
 {
-  "model": "hf:zai-org/GLM-4.7-Flash",
+  "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
   "messages": [{"role": "user", "content": "Reply with ok"}],
   "reasoning_effort": "low",
   "max_completion_tokens": 64
@@ -117,12 +117,12 @@ Treat `reasoning` as supported if the request succeeds and the response includes
 Test image input directly with a tiny inline data URL:
 
 ```bash
-curl -sS https://api.synthetic.new/openai/v1/chat/completions \
-  -H "Authorization: Bearer $SYNTHETIC_API_KEY" \
+curl -sS https://api.featherless.ai/v1/chat/completions \
+  -H "Authorization: Bearer $FEATHERLESS_API_KEY" \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
 {
-  "model": "hf:zai-org/GLM-4.7-Flash",
+  "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
   "messages": [
     {
       "role": "user",
@@ -137,7 +137,7 @@ curl -sS https://api.synthetic.new/openai/v1/chat/completions \
 JSON
 ```
 
-If Synthetic returns an error like `does not appear to support image inputs`, keep `input: ["text"]`.
+If Featherless returns an error like `does not appear to support image inputs`, keep `input: ["text"]`.
 
 ## Compat object
 
@@ -146,19 +146,19 @@ If Synthetic returns an error like `does not appear to support image inputs`, ke
 Only add `compat` when needed. Current useful fields in this repo:
 
 - `supportsDeveloperRole`: set `false` when the provider expects `system` instead of `developer`
-- `supportsReasoningEffort`: set `true` when live Synthetic requests confirm `reasoning_effort` works
+- `supportsReasoningEffort`: set `true` when live Featherless requests confirm `reasoning_effort` works
 - `maxTokensField`: set to:
   - `"max_completion_tokens"` when a model behaves correctly with that field and fails or misbehaves with `max_tokens`
   - `"max_tokens"` otherwise
 - `requiresToolResultName`: only if tool-result requests fail without a `name`
 - `requiresMistralToolIds`: only for Mistral-specific tool id quirks
 
-Default Synthetic provider behavior is set in `src/providers/index.ts`. Per-model `compat` overrides are merged on top of that default.
+Default Featherless provider behavior is set in `src/providers/index.ts`. Per-model `compat` overrides are merged on top of that default.
 
 Add `compat` for a model when at least one of these is true:
 
-1. Synthetic docs require a non-default request field
-2. A direct Synthetic API call succeeds only with a different field layout
+1. Featherless docs require a non-default request field
+2. A direct Featherless API call succeeds only with a different field layout
 3. Pi/proxy capture shows the generated request shape is causing errors
 
 Example:
@@ -172,20 +172,20 @@ compat: {
 
 ## Decision rules
 
-- Set `input` from Synthetic endpoint first.
+- Set `input` from Featherless endpoint first.
 - Set `reasoning` from:
-  1. Synthetic runtime check
-  2. else models.dev synthetic
+  1. Featherless runtime check
+  2. else models.dev featherless
   3. else other providers on models.dev as weak evidence only
-- Set pricing from Synthetic endpoint.
-- Set `maxTokens` from models.dev when Synthetic does not expose it clearly.
+- Set pricing from Featherless endpoint.
+- Set `maxTokens` from models.dev when Featherless does not expose it clearly.
 - Keep compat defaults unless live behavior shows a model-specific quirk.
-- If evidence is mixed, prefer confirmed Synthetic runtime behavior.
+- If evidence is mixed, prefer confirmed Featherless runtime behavior.
 
 ## Current known example
 
-For `hf:zai-org/GLM-4.7-Flash`:
-- Synthetic endpoint reports `input_modalities: ["text"]`
-- Synthetic runtime rejects image input
-- Synthetic runtime accepts `reasoning_effort` and returns reasoning output
+For `Qwen/Qwen2.5-Coder-32B-Instruct`:
+- Featherless endpoint reports `input_modalities: ["text"]`
+- Featherless runtime rejects image input
+- Featherless runtime accepts `reasoning_effort` and returns reasoning output
 - Result: `input: ["text"]`, `reasoning: true`
