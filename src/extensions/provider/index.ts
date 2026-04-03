@@ -9,11 +9,18 @@ interface FeatherlessApiModel {
 }
 
 async function fetchFeatherlessModels(): Promise<FeatherlessApiModel[]> {
-  const response = await fetch("https://api.featherless.ai/v1/models");
+  const response = await fetch("https://api.featherless.ai/v1/models", {
+    headers: {
+      "HTTP-Referer": "https://pi.dev",
+      "X-Title": "Pi Coding Agent",
+      "User-Agent": "Pi/1.0"
+    }
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch models: ${response.status}`);
   }
-  return response.json();
+  const data = await response.json();
+  return data.data || data;
 }
 
 export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<void> {
@@ -25,7 +32,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       id: model.id,
       name: model.id.split('/')[1] || model.id,
       reasoning: false,
-      input: ["text"] as const,
+      input: ["text"] as ("text" | "image")[],
       cost: {
         input: 0.1,
         output: 0.1,

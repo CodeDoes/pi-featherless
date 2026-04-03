@@ -44,7 +44,8 @@ export const FEATHERLESS_MODELS: FeatherlessModelConfig[] = [
     contextWindow: 32768,
     maxTokens: 8192,
     isGated: false,
-
+  },
+  {
     id: "google/gemma-7b",
     name: "Gemma 7B",
     reasoning: false,

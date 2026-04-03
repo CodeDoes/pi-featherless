@@ -18,13 +18,16 @@ importers:
       '@codedoes/pi-featherless':
         specifier: 'link:'
         version: 'link:'
-      '@mariozechner/pi-tui':
-        specifier: link:../pi-mono/packages/coding-agent
-        version: link:../pi-mono/packages/coding-agent
     devDependencies:
       '@changesets/cli':
         specifier: ^2.30.0
         version: 2.30.0(@types/node@25.1.0)
+      '@mariozechner/pi-coding-agent':
+        specifier: link:../pi-mono/packages/coding-agent
+        version: link:../pi-mono/packages/coding-agent
+      '@mariozechner/pi-tui':
+        specifier: link:../pi-mono/packages/coding-agent
+        version: link:../pi-mono/packages/coding-agent
       '@sinclair/typebox':
         specifier: ^0.34.48
         version: 0.34.48
@@ -42,9 +45,6 @@ importers:
         version: 4.0.18(@types/node@25.1.0)(yaml@2.8.2)
     optionalDependencies:
       '@mariozechner/pi-ai':
-        specifier: link:../pi-mono/packages/coding-agent
-        version: link:../pi-mono/packages/coding-agent
-      '@mariozechner/pi-coding-agent':
         specifier: link:../pi-mono/packages/coding-agent
         version: link:../pi-mono/packages/coding-agent
 

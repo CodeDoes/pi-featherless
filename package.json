@@ -16,7 +16,9 @@
   "pi": {
     "extensions": [
       "./src/extensions/provider/index.ts",
-      "./src/extensions/command-tokenize/index.ts"
+      "./src/extensions/command-tokenize/index.ts",
+      "./src/extensions/command-test-models/index.ts",
+      "./src/extensions/command-test-inference/index.ts"
     ]
   },
   "publishConfig": {
@@ -47,11 +49,12 @@
     "@codedoes/pi-featherless": "link:"
   },
   "optionalDependencies": {
-    "@mariozechner/pi-ai": "link:../pi-mono/packages/ai",
-    "@mariozechner/pi-coding-agent": "link:../pi-mono/packages/coding-agent"
+    "@mariozechner/pi-ai": "link:../pi-mono/packages/ai"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
+    "@mariozechner/pi-coding-agent": "link:../pi-mono/packages/coding-agent",
+    "@mariozechner/pi-tui": "link:../pi-mono/packages/coding-agent",
     "@sinclair/typebox": "^0.34.48",
     "@types/node": "^25.0.10",
     "husky": "^9.1.7",

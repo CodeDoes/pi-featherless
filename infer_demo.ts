@@ -41,6 +41,9 @@ async function runInferenceDemo() {
 
     console.log("Attaching Featherless addon to Pi instance...");
     await registerFeatherlessProvider(mockPi);
+    console.log("Registered Featherless provider with dynamic models from API.");
+    const modelCount = registry.getAll().filter(m => m.provider === "featherless").length;
+    console.log(`Fetched ${modelCount} models from Featherless API.`);
 
     // 3. Select a model from the Pi Registry
     const models = registry.getAll().filter(m => m.provider === "featherless");
