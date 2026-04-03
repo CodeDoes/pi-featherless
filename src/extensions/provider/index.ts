@@ -50,11 +50,6 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
     pi.registerProvider(providerId, {
       baseUrl: "https://api.featherless.ai/v1",
       api: "openai-completions",
-      headers: {
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://pi.dev",
-        "X-Title": "Pi Coding Agent",
-      },
       models,
       oauth: {
         name: "Featherless",
