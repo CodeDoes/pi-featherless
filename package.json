@@ -16,7 +16,6 @@
   "pi": {
     "extensions": [
       "./src/extensions/provider/index.ts",
-      "./src/extensions/command-quotas/index.ts"
     ]
   },
   "publishConfig": {

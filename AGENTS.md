@@ -29,7 +29,6 @@ src/
       index.ts                  # Provider extension entry point
       models.ts                 # Hardcoded model definitions
       models.test.ts            # Model config tests
-    command-quotas/
       index.ts                  # Quotas command extension entry point
       command.ts                # `featherless:quotas` command for usage display
       sub-integration.ts        # Integration with pi-sub-core for usage display
