@@ -1,6 +1,6 @@
 # Pi Featherless Extension
 
-A cool Pi extension that adds [Featherless.ai](https://featherless.ai) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
+A cool Pi extension that adds [Featherless.ai](https://featherless.ai/account/api-keys) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
 
 This project is a fork of `pi-synthetic` by Aliou, adapted specifically for Featherless AI.
 
@@ -8,7 +8,7 @@ This project is a fork of `pi-synthetic` by Aliou, adapted specifically for Feat
 
 ### Get API Key
 
-Sign up at [featherless.ai](https://featherless.ai) to get an API key.
+Sign up at [featherless.ai](https://featherless.ai/account/api-keys) to get an API key.
 
 ### Login
 
@@ -116,8 +116,8 @@ This repository uses [Changesets](https://github.com/changesets/changesets) for 
 
 ## Links</parameter
 
-- [Featherless.ai](https://featherless.ai)
-- [Featherless API Docs](https://featherless.ai/docs)
+- [Featherless.ai](https://featherless.ai/account/api-keys)
+- [Featherless API Docs](https://featherless.ai/account/api-keys/docs)
 - [Pi Documentation](https://buildwithpi.ai/)
 ---
 

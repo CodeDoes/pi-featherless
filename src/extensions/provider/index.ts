@@ -97,7 +97,7 @@ default: false,
       oauth: {
         name: "Featherless AI",
         async login(callbacks) {
-          callbacks.onAuth({ url: "https://featherless.ai/settings" });
+          callbacks.onAuth({ url: "https://featherless.ai/account/api-keys" });
           const key = await callbacks.onPrompt({
             message: "Enter your Featherless API key:",
             placeholder: "sk-...",
