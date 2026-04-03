@@ -1,4 +1,4 @@
-import { ExtensionAPI, Model } from "@mariozechner/pi-coding-agent";
+import { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { FEATHERLESS_MODELS } from "./models";
 
 export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<void> {
@@ -13,14 +13,12 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
 
   pi.registerFlag("featherless:show-all-plans", {
     description: "Show models not available on the current plan",
-    type: "boolean",
-    default: false,
-  });
+default: false,
+});
 
   const registerModels = async () => {
     const storedCredentials = pi.auth?.credentials?.[providerId];
-    const credentials = storedCredentials || (process.env.FEATHERLESS_API_KEY ? { access: process.env.FEATHERLESS_API_KEY } : null);
-    const isAuthenticated = !!credentials;
+    const isAuthenticated = !!process.env.FEATHERLESS_API_KEY;
 
     // Check both CLI flags and environment variables for settings
     const showGated = pi.getFlag("featherless:show-gated") || process.env.FEATHERLESS_SHOW_GATED === "true";
@@ -32,7 +30,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
         // Fetch available models from Featherless API
         const response = await fetch('https://api.featherless.ai/v1/models', {
           headers: {
-            'Authorization': `Bearer ${credentials.access}`,
+            'Authorization': `Bearer ${process.env.FEATHERLESS_API_KEY}`,
           },
         });
         if (!response.ok) throw new Error('Failed to fetch models');
@@ -93,7 +91,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       api: "openai-completions",
       headers: {
         "HTTP-Referer": "https://pi.dev",
-        "X-Title": "@kit/pi-featherless",
+        "X-Title": "@codedoes/pi-featherless",
       },
       models,
       oauth: {
@@ -124,32 +122,8 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
   return registerModels();
 
   // Re-register models on auth change
-  pi.on("auth_changed", (event) => {
-    if (event.providerId === providerId) {
-      registerModels();
-    }
-  });
   
   // Inject concurrency slot into headers if provided via login or env
-    pi.on("before_provider_request", (event, _ctx) => {
-    // Only intercept requests for the featherless provider
-    if (event.providerId !== providerId) return;
-
-    console.log("[Featherless] Request payload:", JSON.stringify(event.payload, null, 2));
-
-    // Try to get slot from env
-    const slot = process.env.FEATHERLESS_CONCURRENCY_SLOT;
-
-    if (slot) {
-      const payload = event.payload as any;
-      payload.headers = {
-        ...payload.headers,
-        "X-Featherless-Concurrency-Slot": slot,
-      };
-    }
-
-    return event.payload;
-  });
 }
 
 export default async function (pi: ExtensionAPI) {
