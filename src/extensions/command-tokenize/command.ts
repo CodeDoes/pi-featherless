@@ -18,7 +18,7 @@ export function registerTokenizeCommand(pi: ExtensionAPI, apiKey: string): void 
             "Content-Type": "application/json",
             "Authorization": `Bearer ${apiKey}`,
           },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ model: "mistralai/Mistral-7B-Instruct-v0.2", text }),
         });
 
         if (!response.ok) {
@@ -26,7 +26,7 @@ export function registerTokenizeCommand(pi: ExtensionAPI, apiKey: string): void 
         }
 
         const data = await response.json();
-        const tokens = data.usage?.total_tokens ?? data.tokens ?? "unknown";
+        const tokens = Array.isArray(data.tokens) ? data.tokens.length : (data.usage?.total_tokens ?? "unknown");
         ctx.ui.notify(`Token count: ${tokens} for "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`, "info");
       } catch (error) {
         ctx.ui.notify(`Failed to tokenize: ${error.message}`, "error");
