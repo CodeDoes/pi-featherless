@@ -28,7 +28,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
 
   const registerModels = async () => {
     const apiModels = await fetchFeatherlessModels();
-    const models = apiModels.map((model) => ({
+    const models = apiModels.filter(m => m.id.startsWith("Qwen/") || m.id === "moonshotai/Kimi-K2-Instruct").map((model) => ({
       id: model.id,
       name: model.id.split('/')[1] || model.id,
       reasoning: false,
