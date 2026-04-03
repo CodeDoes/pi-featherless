@@ -28,7 +28,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
 
   const registerModels = async () => {
     const apiModels = await fetchFeatherlessModels();
-    const models = apiModels.filter(m => m.id.startsWith("Qwen/") || m.id === "moonshotai/Kimi-K2-Instruct").map((model) => ({
+    const models = apiModels.map((model) => ({
       id: model.id,
       name: model.id.split('/')[1] || model.id,
       reasoning: model.id.startsWith("Qwen/") ? true : false,
@@ -44,7 +44,7 @@ export async function registerFeatherlessProvider(pi: ExtensionAPI): Promise<voi
       compat: {
         supportsDeveloperRole: false,
         maxTokensField: "max_tokens",
-        supportsToolCalls: true,
+        supportsToolCalls: model.id.startsWith("Qwen/") || model.id === "moonshotai/Kimi-K2-Instruct" ? true : false,
       },
     }));
 
