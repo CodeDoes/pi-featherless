@@ -98,7 +98,7 @@ default: false,
       },
       models,
       oauth: {
-        name: "Featherless AI",
+        name: "Featherless",
         async login(callbacks) {
           callbacks.onAuth({ url: "https://featherless.ai/account/api-keys" });
           const key = await callbacks.onPrompt({
