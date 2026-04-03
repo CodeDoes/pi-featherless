@@ -9,7 +9,6 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
     headers: {
       Referer: "https://pi.dev",
       "X-Title": "@kit/pi-featherless",
-      "X-Concurrency-Slot": "FEATHERLESS_CONCURRENCY_SLOT",
     },
     models: FEATHERLESS_MODELS.map((model) => ({
       id: model.id,
@@ -33,13 +32,9 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
           message: "Enter your Featherless API key:",
           placeholder: "sk-...",
         });
-        const slot = await callbacks.onPrompt({
-          message: "Enter your Concurrency Slot (optional):",
-          placeholder: "1",
-        });
         return {
           access: key,
-          refresh: slot || "1",
+          refresh: key,
           expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
         };
       },
@@ -53,16 +48,16 @@ export function registerFeatherlessProvider(pi: ExtensionAPI): void {
   });
 
   // Inject concurrency slot into headers if provided via login or env
-  pi.on("before_provider_request", (event, ctx) => {
+  pi.on("before_provider_request", (event, _ctx) => {
     if (event.model.provider !== "featherless") return;
 
-    const credentials = (pi as any).getCredentials?.("featherless");
-    const slot = credentials?.refresh || process.env.FEATHERLESS_CONCURRENCY_SLOT;
+    // Try to get slot from env or from the 'refresh' field we used in oauth login
+    const slot = process.env.FEATHERLESS_CONCURRENCY_SLOT;
 
     if (slot) {
       event.payload.headers = {
         ...event.payload.headers,
-        "X-Concurrency-Slot": slot,
+        "X-Featherless-Concurrency-Slot": slot,
       };
     }
   });
