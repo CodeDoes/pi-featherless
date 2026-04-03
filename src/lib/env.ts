@@ -1,7 +1,7 @@
-export function hasSyntheticApiKey(): boolean {
-  return Boolean(process.env.SYNTHETIC_API_KEY);
+export function hasFeatherlessApiKey(): boolean {
+  return Boolean(process.env.FEATHERLESS_API_KEY);
 }
 
-export function getSyntheticApiKey(): string {
-  return process.env.SYNTHETIC_API_KEY || "";
+export function getFeatherlessApiKey(): string {
+  return process.env.FEATHERLESS_API_KEY || "";
 }

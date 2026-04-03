@@ -1,6 +1,6 @@
 {
-  "name": "@aliou/pi-synthetic",
-  "version": "0.8.5",
+  "name": "@aliou/pi-featherless",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "private": false,
@@ -11,15 +11,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/aliou/pi-synthetic"
+    "url": "https://github.com/aliou/pi-featherless"
   },
   "pi": {
     "extensions": [
-      "./src/extensions/provider/index.ts",
-      "./src/extensions/web-search/index.ts",
-      "./src/extensions/command-quotas/index.ts"
+      "./src/extensions/provider/index.ts"
     ],
-    "video": "https://assets.aliou.me/pi-extensions/demos/pi-synthetic.mp4"
+    "video": "https://assets.aliou.me/pi-extensions/demos/pi-featherless.mp4"
   },
   "publishConfig": {
     "access": "public"
@@ -42,7 +40,7 @@
     "prepare": "[ -d .git ] && husky || true",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm changeset publish"
+    "release": "changeset publish"
   },
   "dependencies": {
     "@aliou/pi-utils-ui": "^0.1.2"

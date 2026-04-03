@@ -1,33 +1,33 @@
-# Pi Synthetic Extension
+# Pi Featherless Extension
 
-A Pi extension that adds [Synthetic](https://synthetic.new) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
+A cool Pi extension that adds [Featherless.ai](https://featherless.ai) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
 
 ## Installation
 
 ### Get API Key
 
-Sign up at [synthetic.new](https://synthetic.new/?referral=NDWw1u3UDWiFyDR) to get an API key (referral link).
+Sign up at [featherless.ai](https://featherless.ai) to get an API key.
 
 ### Set Environment Variable
 
 ```bash
-export SYNTHETIC_API_KEY="your-api-key-here"
+export FEATHERLESS_API_KEY="your-api-key-here"
 ```
 
 Add to shell profile for persistence:
 
 ```bash
-echo 'export SYNTHETIC_API_KEY="your-api-key-here"' >> ~/.zshrc
+echo 'export FEATHERLESS_API_KEY="your-api-key-here"' >> ~/.zshrc
 ```
 
 ### Install Extension
 
 ```bash
 # From npm
-pi install npm:@aliou/pi-synthetic
+pi install npm:@aliou/pi-featherless
 
 # From git
-pi install git:github.com/aliou/pi-synthetic
+pi install git:github.com/aliou/pi-featherless
 
 # Local development
 pi -e ./src/index.ts
@@ -35,33 +35,10 @@ pi -e ./src/index.ts
 
 ## Usage
 
-Once installed, select `synthetic` as your provider and choose from available models:
+Once installed, select `featherless` as your provider and choose from available models:
 
 ```
-/model synthetic hf:moonshotai/Kimi-K2.5
-```
-
-### Web Search Tool
-
-The extension registers `synthetic_web_search` — a zero-data-retention web search tool. Available when you have an active Synthetic subscription.
-
-### Reasoning Levels
-
-For Synthetic models that support reasoning, Synthetic currently accepts only `low`, `medium`, and `high` reasoning effort values.
-
-This extension clamps Pi reasoning levels to Synthetic's supported set:
-- `minimal` -> `low`
-- `low` -> `low`
-- `medium` -> `medium`
-- `high` -> `high`
-- `xhigh` -> `high`
-
-### Quotas Command
-
-Check your API usage:
-
-```
-/synthetic:quotas
+/model featherless featherless:gpt-oss-20b
 ```
 
 ## Adding or Updating Models
@@ -69,7 +46,7 @@ Check your API usage:
 Models are hardcoded in `src/providers/models.ts`. To add or update models:
 
 1. Edit `src/providers/models.ts`
-2. Add the model configuration following the `SyntheticModelConfig` interface
+2. Add the model configuration following the `FeatherlessModelConfig` interface
 3. Run `pnpm run typecheck` to verify
 
 ## Development
@@ -77,8 +54,8 @@ Models are hardcoded in `src/providers/models.ts`. To add or update models:
 ### Setup
 
 ```bash
-git clone https://github.com/aliou/pi-synthetic.git
-cd pi-synthetic
+git clone https://github.com/aliou/pi-featherless.git
+cd pi-featherless
 
 # Install dependencies (sets up pre-commit hooks)
 pnpm install && pnpm prepare
@@ -124,11 +101,10 @@ This repository uses [Changesets](https://github.com/changesets/changesets) for 
 ## Requirements
 
 - Pi coding agent v0.50.0+
-- SYNTHETIC_API_KEY environment variable
+- FEATHERLESS_API_KEY environment variable
 
 ## Links
 
-- [Synthetic](https://synthetic.new)
-- [Synthetic Models](https://synthetic.new/models)
-- [Synthetic API Docs](https://dev.synthetic.new/docs/api/overview)
+- [Featherless.ai](https://featherless.ai)
+- [Featherless API Docs](https://featherless.ai/docs)
 - [Pi Documentation](https://buildwithpi.ai/)
