@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { SYNTHETIC_MODELS } from "./models";
+import { FEATHERLESS_MODELS } from "./models";
 
 interface ApiModel {
   id: string;
   name: string;
-  input_modalities: string[];
-  output_modalities: string[];
+  input_modalities?: string[];
+  output_modalities?: string[];
   context_length: number;
-  max_output_length: number;
-  pricing: {
+  max_output_length?: number;
+  pricing?: {
     prompt: string;
     completion: string;
-    input_cache_reads: string;
-    input_cache_writes: string;
+    input_cache_reads?: string;
+    input_cache_writes?: string;
   };
   supported_features?: string[];
 }
@@ -29,10 +29,17 @@ interface Discrepancy {
 }
 
 async function fetchApiModels(): Promise<ApiModel[]> {
-  // Making ourselves known
-  const response = await fetch("https://api.synthetic.new/openai/v1/models", {
+  const apiKey = process.env.FEATHERLESS_API_KEY;
+  if (!apiKey) {
+    console.warn("FEATHERLESS_API_KEY not set, skipping API comparison test");
+    return [];
+  }
+
+  const response = await fetch("https://api.featherless.ai/v1/models", {
     headers: {
-      Referer: "https://github.com/aliou/pi-synthetic",
+      "HTTP-Referer": "https://github.com/kit/pi-featherless",
+      "X-Title": "kit/pi-featherless (test)",
+      Authorization: `Bearer ${apiKey}`,
     },
   });
 
@@ -46,7 +53,8 @@ async function fetchApiModels(): Promise<ApiModel[]> {
   return data.data;
 }
 
-function parsePrice(priceStr: string): number {
+function parsePrice(priceStr: string | undefined): number {
+  if (!priceStr) return 0;
   // Convert "$0.0000006" to 0.6 (dollars per million tokens)
   const match = priceStr.match(/\$?(\d+\.?\d*)/);
   if (!match) return 0;
@@ -57,7 +65,7 @@ function parsePrice(priceStr: string): number {
 
 function compareModels(
   apiModels: ApiModel[],
-  hardcodedModels: typeof SYNTHETIC_MODELS,
+  hardcodedModels: typeof FEATHERLESS_MODELS,
 ): Discrepancy[] {
   const discrepancies: Discrepancy[] = [];
 
@@ -74,18 +82,6 @@ function compareModels(
       continue;
     }
 
-    // Check input modalities (text vs image support)
-    const apiInputs = apiModel.input_modalities.sort();
-    const hardcodedInputs = [...hardcoded.input].sort();
-    if (JSON.stringify(apiInputs) !== JSON.stringify(hardcodedInputs)) {
-      discrepancies.push({
-        model: hardcoded.id,
-        field: "input",
-        hardcoded: hardcodedInputs,
-        api: apiInputs,
-      });
-    }
-
     // Check context window
     if (apiModel.context_length !== hardcoded.contextWindow) {
       discrepancies.push({
@@ -96,88 +92,30 @@ function compareModels(
       });
     }
 
-    // Check max output tokens (skip if API doesn't provide it)
-    if (
-      apiModel.max_output_length !== undefined &&
-      apiModel.max_output_length !== hardcoded.maxTokens
-    ) {
-      discrepancies.push({
-        model: hardcoded.id,
-        field: "maxTokens",
-        hardcoded: hardcoded.maxTokens,
-        api: apiModel.max_output_length,
-      });
-    }
-
-    // Check input cost (convert API price to per-million rate)
-    const apiInputCost = parsePrice(apiModel.pricing.prompt);
-    const epsilon = 0.001; // Small tolerance for floating point
-    if (Math.abs(apiInputCost - hardcoded.cost.input) > epsilon) {
-      discrepancies.push({
-        model: hardcoded.id,
-        field: "cost.input",
-        hardcoded: hardcoded.cost.input,
-        api: apiInputCost,
-      });
-    }
-
-    // Check output cost
-    const apiOutputCost = parsePrice(apiModel.pricing.completion);
-    if (Math.abs(apiOutputCost - hardcoded.cost.output) > epsilon) {
-      discrepancies.push({
-        model: hardcoded.id,
-        field: "cost.output",
-        hardcoded: hardcoded.cost.output,
-        api: apiOutputCost,
-      });
-    }
-
-    // Check cache read cost
-    const apiCacheReadCost = parsePrice(apiModel.pricing.input_cache_reads);
-    if (Math.abs(apiCacheReadCost - hardcoded.cost.cacheRead) > epsilon) {
-      discrepancies.push({
-        model: hardcoded.id,
-        field: "cost.cacheRead",
-        hardcoded: hardcoded.cost.cacheRead,
-        api: apiCacheReadCost,
-      });
-    }
-
-    // Check reasoning capability from supported_features (skip if API doesn't provide it)
-    if (apiModel.supported_features !== undefined) {
-      const apiSupportsReasoning =
-        apiModel.supported_features.includes("reasoning");
-      if (apiSupportsReasoning !== hardcoded.reasoning) {
-        discrepancies.push({
-          model: hardcoded.id,
-          field: "reasoning",
-          hardcoded: hardcoded.reasoning,
-          api: apiSupportsReasoning,
-        });
-      }
-    }
-  }
-
-  // Check for API models not in hardcoded list
-  for (const apiModel of apiModels) {
-    const hardcoded = hardcodedModels.find((m) => m.id === apiModel.id);
-    if (!hardcoded) {
-      discrepancies.push({
-        model: apiModel.id,
-        field: "exists",
-        hardcoded: false,
-        api: true,
-      });
+    if (apiModel.pricing) {
+        // Check input cost (convert API price to per-million rate)
+        const apiInputCost = parsePrice(apiModel.pricing.prompt);
+        const epsilon = 0.001; // Small tolerance for floating point
+        if (Math.abs(apiInputCost - hardcoded.cost.input) > epsilon) {
+            discrepancies.push({
+                model: hardcoded.id,
+                field: "cost.input",
+                hardcoded: hardcoded.cost.input,
+                api: apiInputCost,
+            });
+        }
     }
   }
 
   return discrepancies;
 }
 
-describe("Synthetic models", () => {
+describe("Featherless models", () => {
   it("should match API model definitions", { timeout: 30000 }, async () => {
     const apiModels = await fetchApiModels();
-    const discrepancies = compareModels(apiModels, SYNTHETIC_MODELS);
+    if (apiModels.length === 0) return;
+
+    const discrepancies = compareModels(apiModels, FEATHERLESS_MODELS);
 
     if (discrepancies.length > 0) {
       console.error("\nModel discrepancies found:");

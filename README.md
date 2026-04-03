@@ -20,13 +20,19 @@ You can use the built-in login command to securely provide your API key:
 
 Select **Featherless AI** from the menu and enter your key.
 
-### Set Environment Variable (Optional)
+### Set Environment Variables (Optional)
 
-Alternatively, you can use an environment variable:
+Alternatively, you can use environment variables:
 
 ```bash
 export FEATHERLESS_API_KEY="your-api-key-here"
+# Optional: Set concurrency slot for priority access
+export FEATHERLESS_CONCURRENCY_SLOT="your-slot-id"
 ```
+
+## Concurrency Slots
+
+This extension supports the `X-Featherless-Concurrency-Slot` header. If you have a dedicated or shared concurrency slot, set the `FEATHERLESS_CONCURRENCY_SLOT` environment variable. The extension will automatically inject this into all outgoing requests to ensure your traffic is routed to the correct compute lane.
 
 ### Install Extension
 
