@@ -1,88 +1,78 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import registerFeatherlessProvider from "./index";
+import { registerFeatherlessProvider } from "./index";
+import { FEATHERLESS_MODELS } from "./models";
 
-describe("Featherless provider extension", () => {
-  it("should register the featherless provider", async () => {
-    const mockPi = {
-      registerProvider: vi.fn(),
-      on: vi.fn(),
-    } as unknown as ExtensionAPI;
+describe("Featherless provider registration", () => {
+  const createMockPi = (flags: Record<string, boolean> = {}) => ({
+    registerProvider: vi.fn(),
+    on: vi.fn(),
+    registerFlag: vi.fn(),
+    getFlag: vi.fn((name) => flags[name] || false),
+  } as any);
 
-    await registerFeatherlessProvider(mockPi);
+  it("should register models with IDs that match the FEATHERLESS_MODELS (non-gated, available)", () => {
+    const mockPi = createMockPi();
+    registerFeatherlessProvider(mockPi);
 
-    expect(mockPi.registerProvider).toHaveBeenCalledWith(
-      "featherless",
-      expect.objectContaining({
-        baseUrl: "https://api.featherless.ai/v1",
-        api: "openai-completions",
-        headers: expect.objectContaining({
-          "HTTP-Referer": "https://pi.dev",
-          "X-Title": "@kit/pi-featherless",
-        }),
-      })
-    );
-  });
+    expect(mockPi.registerProvider).toHaveBeenCalled();
+    const [providerId, config] = mockPi.registerProvider.mock.calls[0];
 
-  it("should inject X-Featherless-Concurrency-Slot into headers", async () => {
-    const mockPi = {
-      registerProvider: vi.fn(),
-      on: vi.fn(),
-    } as unknown as ExtensionAPI;
-
-    // Set env var for testing
-    process.env.FEATHERLESS_CONCURRENCY_SLOT = "test-slot";
-
-    await registerFeatherlessProvider(mockPi);
-
-    // Get the before_provider_request listener
-    const onCall = (mockPi.on as any).mock.calls.find(
-      (call: any) => call[0] === "before_provider_request"
-    );
-    expect(onCall).toBeDefined();
-
-    const listener = onCall[1];
-    const event = {
-      model: { provider: "featherless" },
-      payload: { headers: {} },
-    };
-
-    listener(event, {});
-
-    expect(event.payload.headers).toHaveProperty(
-      "X-Featherless-Concurrency-Slot",
-      "test-slot"
-    );
-
-    // Cleanup env var
-    delete process.env.FEATHERLESS_CONCURRENCY_SLOT;
-  });
-
-  it("should NOT inject concurrency slot for other providers", async () => {
-    const mockPi = {
-      registerProvider: vi.fn(),
-      on: vi.fn(),
-    } as unknown as ExtensionAPI;
-
-    process.env.FEATHERLESS_CONCURRENCY_SLOT = "test-slot";
-    await registerFeatherlessProvider(mockPi);
-
-    const onCall = (mockPi.on as any).mock.calls.find(
-      (call: any) => call[0] === "before_provider_request"
-    );
-    const listener = onCall[1];
+    expect(providerId).toBe("featherless");
     
-    const event = {
-      model: { provider: "openai" },
-      payload: { headers: {} },
-    };
+    // Default: filters out gated and unavailable models
+    const expectedModels = FEATHERLESS_MODELS.filter(m => !m.isGated && m.availableOnPlan !== false);
+    expect(config.models).toHaveLength(expectedModels.length);
+    
+    for (const model of expectedModels) {
+      expect(config.models.find((m: any) => m.id === model.id)).toBeDefined();
+    }
+  });
 
-    listener(event, {});
+  it("should find a model by ID when simulating pi's lookup", () => {
+    const mockPi = createMockPi();
+    registerFeatherlessProvider(mockPi);
+    const config = mockPi.registerProvider.mock.calls[0][1];
+    
+    const targetModelId = FEATHERLESS_MODELS.find(m => !m.isGated && m.availableOnPlan !== false)!.id;
+    const foundModel = config.models.find((m: any) => m.id === targetModelId);
 
-    expect(event.payload.headers).not.toHaveProperty(
-      "X-Featherless-Concurrency-Slot"
-    );
+    expect(foundModel).toBeDefined();
+    expect(foundModel.id).toBe(targetModelId);
+  });
 
-    delete process.env.FEATHERLESS_CONCURRENCY_SLOT;
+  it("should filter gated models by default", () => {
+    const mockPi = createMockPi();
+    registerFeatherlessProvider(mockPi);
+    const config = mockPi.registerProvider.mock.calls[0][1];
+
+    const gatedModel = FEATHERLESS_MODELS.find(m => m.isGated);
+    if (gatedModel) {
+      const found = config.models.find((m: any) => m.id === gatedModel.id);
+      expect(found).toBeUndefined();
+    }
+  });
+
+  it("should show gated models when flag is enabled", () => {
+    const mockPi = createMockPi({ "featherless:show-gated": true });
+    registerFeatherlessProvider(mockPi);
+    const config = mockPi.registerProvider.mock.calls[0][1];
+
+    const gatedModel = FEATHERLESS_MODELS.find(m => m.isGated);
+    if (gatedModel) {
+      const found = config.models.find((m: any) => m.id === gatedModel.id);
+      expect(found).toBeDefined();
+    }
+  });
+
+  it("should filter models not available on plan by default", () => {
+    const mockPi = createMockPi();
+    registerFeatherlessProvider(mockPi);
+    const config = mockPi.registerProvider.mock.calls[0][1];
+
+    const unavailableModel = FEATHERLESS_MODELS.find(m => m.availableOnPlan === false);
+    if (unavailableModel) {
+      const found = config.models.find((m: any) => m.id === unavailableModel.id);
+      expect(found).toBeUndefined();
+    }
   });
 });

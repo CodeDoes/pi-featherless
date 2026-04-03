@@ -3,8 +3,8 @@ import { fetchQuotas } from "../../utils/quotas";
 import { QuotasComponent } from "./components/quotas-display";
 
 export function registerQuotasCommand(pi: ExtensionAPI): void {
-  pi.registerCommand("synthetic:quotas", {
-    description: "Display Synthetic API usage quotas",
+  pi.registerCommand("featherless:quotas", {
+    description: "Display Featherless API usage quotas",
     handler: async (_args, ctx) => {
       const result = await ctx.ui.custom<null>((tui, theme, _kb, done) => {
         const component = new QuotasComponent(theme, () => done(null));
