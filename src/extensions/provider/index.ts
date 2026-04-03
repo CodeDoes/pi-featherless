@@ -88,7 +88,6 @@ default: false,
 
     pi.registerProvider(providerId, {
       baseUrl: "https://api.featherless.ai/v1",
-      apiKey: "FEATHERLESS_API_KEY",
       api: "openai-completions",
       headers: {
         "HTTP-Referer": "https://pi.dev",
