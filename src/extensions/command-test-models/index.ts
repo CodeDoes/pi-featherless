@@ -1,8 +1,7 @@
 import { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export async function registerFeatherlessTestModelsCommand(pi: ExtensionAPI): Promise<void> {
-  pi.registerCommand({
-    name: "featherless:test-models",
+  pi.registerCommand("featherless:test-models", {
     description: "Test fetching and display Featherless models",
     handler: async () => {
       console.log("Fetching Featherless models from API...");
@@ -27,7 +26,7 @@ export async function registerFeatherlessTestModelsCommand(pi: ExtensionAPI): Pr
           console.log(`  ... and ${models.length - 10} more`);
         }
       } catch (error) {
-        console.error("Error:", error.message);
+        console.error("Error:", (error as Error).message);
       }
     }
   });
