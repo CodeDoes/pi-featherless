@@ -18,7 +18,8 @@ default: false,
 
   const registerModels = async () => {
     const storedCredentials = pi.auth?.credentials?.[providerId];
-    const isAuthenticated = !!process.env.FEATHERLESS_API_KEY;
+    const credentials = storedCredentials;
+    const isAuthenticated = !!credentials;
 
     // Check both CLI flags and environment variables for settings
     const showGated = pi.getFlag("featherless:show-gated") || process.env.FEATHERLESS_SHOW_GATED === "true";
