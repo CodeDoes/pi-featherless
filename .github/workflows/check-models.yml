@@ -1,4 +1,4 @@
-name: Check Synthetic Models Daily
+name: Check Featherless Models Daily
 
 on:
   schedule:
