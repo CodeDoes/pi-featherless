@@ -15,10 +15,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/extensions/provider/index.ts",
-      "./src/extensions/command-tokenize/index.ts",
-      "./src/extensions/command-test-models/index.ts",
-      "./src/extensions/command-test-inference/index.ts"
+      "./src/extensions/provider/index.ts"
     ]
   },
   "publishConfig": {
@@ -26,8 +23,7 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-tui": "*",
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-tui": "*"
   },
   "peerDependenciesMeta": {
     "@mariozechner/pi-ai": {
@@ -57,24 +53,21 @@
     "release": "changeset publish"
   },
   "dependencies": {
-    "@aliou/pi-utils-ui": "^0.1.2",
-    "@codedoes/pi-featherless": "link:"
+    "@mariozechner/pi-coding-agent": "0.65.0",
+    "openai": "^4.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@changesets/cli": "^2.30.0",
-    "@mariozechner/pi-coding-agent": "link:../pi-mono/packages/coding-agent",
     "@mariozechner/pi-tui": "link:../pi-mono/packages/coding-agent",
     "@sinclair/typebox": "^0.34.48",
     "@types/node": "^25.0.10",
     "husky": "^9.1.7",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "pnpm": {
-    "overrides": {
-      "@mariozechner/pi-ai": "$@mariozechner/pi-coding-agent",
-      "@mariozechner/pi-tui": "$@mariozechner/pi-coding-agent"
-    },
     "onlyBuiltDependencies": [
       "esbuild"
     ]
