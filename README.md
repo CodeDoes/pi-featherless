@@ -1,8 +1,27 @@
 # Pi Featherless Extension
 
-A cool Pi extension that adds [Featherless.ai](https://featherless.ai/account/api-keys) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
+A [Pi](https://buildwithpi.ai/) extension that adds [Featherless.ai](https://featherless.ai) as a model provider, giving you access to open-source models through an OpenAI-compatible API.
 
-This project is a fork of `pi-synthetic` by Aliou, adapted specifically for Featherless AI.
+## Features
+
+- **Native tool calling** for models that support it (Qwen3, Kimi-K2) via OpenAI-compatible `tool_calls` format
+- **Text tag fallback** for models that emit `<tool_call>` or `<function-call>` tags in content (QRWKV, RWKV6, older models)
+- **Real-time streaming** with dual-path detection: prefers native `delta.tool_calls`, falls back to text tag parsing automatically
+- **Qwen3 thinking mode** with `enable_thinking` support
+- **OAuth login** flow for API key management
+- **/featherless-status** command showing error rates and concurrency usage
+- **Curated model list** with context window and concurrency cost metadata
+
+## Supported Models
+
+| Family | Models | Tool Calling | Reasoning |
+|--------|--------|-------------|-----------|
+| Qwen3 | 8B, 14B, 32B | Native | Yes |
+| Qwen 2.5 | 72B Instruct | Native | No |
+| DeepSeek R1 | 0528-Qwen3-8B | Text tags | Yes |
+| QRWKV | 72B | Text tags | No |
+| RWKV6 | Qwen2.5-32B QwQ | Text tags | No |
+| Llama 3 | 8B Instruct (abliterated) | Text tags | No |
 
 ## Installation
 
@@ -10,9 +29,19 @@ This project is a fork of `pi-synthetic` by Aliou, adapted specifically for Feat
 
 Sign up at [featherless.ai](https://featherless.ai/account/api-keys) to get an API key.
 
+### Install Extension
+
+```bash
+# From git
+pi install git:github.com/CodeDoes/pi-featherless
+
+# Local development
+pi -e ./src/extensions/provider/index.ts
+```
+
 ### Login
 
-You can use the built-in login command to securely provide your API key:
+Use the built-in login command to provide your API key:
 
 ```bash
 /login
@@ -20,96 +49,87 @@ You can use the built-in login command to securely provide your API key:
 
 Select **Featherless AI** from the menu and enter your key.
 
-```
-
-## Concurrency Slots
-
-This extension supports the `X-Featherless-Concurrency-Slot` header. If you have a dedicated or shared concurrency slot, set the `FEATHERLESS_CONCURRENCY_SLOT` environment variable. The extension will automatically inject this into all outgoing requests to ensure your traffic is routed to the correct compute lane.
-
-### Install Extension
-
-```bash
-# From git
-pi install git:github.com/Codedoes/pi-featherless
-
-# Local development
-pi -e ./src/extensions/provider/index.ts
-```
-
 ## Usage
 
 Once installed, select `featherless` as your provider and choose from available models:
 
 ```
-/model featherless featherless:gpt-oss-20b
+/model featherless Qwen/Qwen3-32B
 ```
 
-## Adding or Updating Models
+### Concurrency Slots
 
-Models are hardcoded in `src/providers/models.ts`. To add or update models:
+Featherless has per-plan concurrency limits with weighted costs per model size:
 
-1. Edit `src/providers/models.ts`
-2. Add the model configuration following the `FeatherlessModelConfig` interface
-3. Run `pnpm run typecheck` to verify
+| Model Size | Concurrency Cost |
+|-----------|-----------------|
+| 7B-15B | 1 |
+| 24B-34B | 2 |
+| 70B-72B | 4 |
+
+Set a dedicated concurrency slot via environment variable:
+
+```bash
+export FEATHERLESS_CONCURRENCY_SLOT=your-slot-id
+```
+
+## Tool Use Benchmark
+
+A standalone benchmark (`bench.ts`) tests tool calling across model families:
+
+```bash
+# Run all models (reads .env for FEATHERLESS_API_KEY)
+npx tsx bench.ts
+
+# Filter by model family
+npx tsx bench.ts qwen3
+
+# Control batch size (model switch limit) and delay
+npx tsx bench.ts --batch 4 --delay 30
+```
+
+5 test scenarios: Hello World, Right Tool, JSON Inception, Self Control, Pipeline.
 
 ## Development
 
 ### Setup
 
 ```bash
-git clone https://github.com/Codedoes/pi-featherless.git
+git clone https://github.com/CodeDoes/pi-featherless.git
 cd pi-featherless
-
-# Install dependencies (sets up pre-commit hooks)
 pnpm install && pnpm prepare
 ```
-
-Pre-commit hooks run on every commit:
-- TypeScript type checking
-- Biome linting
-- Biome formatting with auto-fix
 
 ### Commands
 
 ```bash
-# Type check
-pnpm run typecheck
-
-# Lint
-pnpm run lint
-
-# Format
-pnpm run format
-
-# Test
-pnpm run test
+pnpm run typecheck   # TypeScript type checking
+pnpm run lint        # Biome linting
+pnpm run format      # Biome formatting with auto-fix
+pnpm run test        # Vitest unit tests
 ```
 
-### Test Locally
+### Project Structure
 
-```bash
-pi -e ./src/index.ts
+```
+src/extensions/provider/
+  index.ts          # Main provider: streaming, message conversion, tool parsing
+  index.test.ts     # Tests for parseToolCallTags + provider registration
+  models.ts         # Curated model list + concurrency metadata
+  models.test.ts    # Model config validation tests
+bench.ts            # Standalone tool use benchmark
 ```
 
-## Release
+### Pre-commit Hooks
 
-This repository uses [Changesets](https://github.com/changesets/changesets) for versioning.
-
-**Note:** Automatic NPM publishing is currently disabled. To publish manually:
-
-1. Create a changeset: `pnpm changeset`
-2. Version packages: `pnpm version`
-3. Publish (when ready): Uncomment the publish job in `.github/workflows/publish.yml`
+Runs on every commit: typecheck, lint, format, test.
 
 ## Requirements
 
-- Pi coding agent v0.50.0+
+- Pi coding agent v0.65.0+
 
-## Links</parameter
+## Links
 
-- [Featherless.ai](https://featherless.ai/account/api-keys)
-- [Featherless API Docs](https://featherless.ai/account/api-keys/docs)
+- [Featherless.ai](https://featherless.ai)
+- [Featherless API Docs](https://featherless.ai/docs)
 - [Pi Documentation](https://buildwithpi.ai/)
----
-
-*This project was developed with the assistance of GitHub Copilot.*

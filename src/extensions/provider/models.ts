@@ -1,4 +1,4 @@
-import type { Api, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
+import type { OpenAICompletionsCompat } from "@mariozechner/pi-ai";
 import type { ProviderModelConfig } from "@mariozechner/pi-coding-agent";
 
 /**
