@@ -351,10 +351,30 @@ function streamFeatherless(
         };
       }
 
-      // Estimate input tokens from message content (chars/4 heuristic)
-      const estimatedInputTokens = Math.ceil(
-        JSON.stringify(params.messages).length / 4,
-      );
+      // Get actual input token count via Featherless tokenize API
+      let inputTokenCount = 0;
+      try {
+        const tokenizeResp = await fetch(`${model.baseUrl}/tokenize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: model.id,
+            text: JSON.stringify(params.messages),
+          }),
+        });
+        if (tokenizeResp.ok) {
+          const tokenizeData = (await tokenizeResp.json()) as {
+            tokens: number[];
+          };
+          inputTokenCount = tokenizeData.tokens.length;
+        }
+      } catch {
+        // Fall back to chars/4 estimate if tokenize fails
+        inputTokenCount = Math.ceil(JSON.stringify(params.messages).length / 4);
+      }
 
       const openaiStream = await client.chat.completions.create(params, {
         signal: options?.signal,
@@ -718,9 +738,9 @@ function streamFeatherless(
       // Featherless doesn't return usage for streaming requests.
       // Estimate so pi can trigger auto-compaction.
       if (output.usage.totalTokens === 0) {
-        output.usage.input = estimatedInputTokens;
+        output.usage.input = inputTokenCount;
         output.usage.output = outputTokenCount;
-        output.usage.totalTokens = estimatedInputTokens + outputTokenCount;
+        output.usage.totalTokens = inputTokenCount + outputTokenCount;
       }
 
       if (options?.signal?.aborted) {

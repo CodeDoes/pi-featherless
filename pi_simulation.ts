@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { AuthStorage } from "../pi-mono/packages/coding-agent/src/core/auth-storage";
 import { createExtensionRuntime } from "../pi-mono/packages/coding-agent/src/core/extensions/loader";
 import { ModelRegistry } from "../pi-mono/packages/coding-agent/src/core/model-registry";
