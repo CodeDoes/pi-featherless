@@ -6,32 +6,24 @@
  * `tool_calls` objects. This extension provides a custom streamSimple that
  * parses those tags into pi-ai ToolCall events so tool execution works.
  *
- * Usage:
- *   FEATHERLESS_API_KEY=rc_... pi -e ./path/to/pi-featherless
+ * This extension is Qwen3-focused for now, supporting only the <tool_call> format.
  */
 
-import {
-    type Api,
-    type AssistantMessage,
-    type AssistantMessageEventStream,
-    type Context,
-    calculateCost,
-    createAssistantMessageEventStream,
-    type Model,
-    type SimpleStreamOptions,
-    type StopReason,
-    type TextContent,
-    type ThinkingContent,
-    type Tool,
-    type ToolCall,
-    type ToolResultMessage,
+import type {
+    AssistantMessageEventStream,
+    Context,
+    Model,
+    OpenAICompletionsCompat,
+    ProviderModelConfig,
+    SimpleStreamOptions,
+    ToolCall,
 } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import OpenAI from "openai";
 import { FEATHERLESS_MODELS, MODEL_META } from "./models";
 
 // =============================================================================
-// Tool-call tag parser
+// Tool-call tag parser (Qwen3-only)
 // =============================================================================
 
 interface ParsedContent {
@@ -43,32 +35,31 @@ interface ParsedContent {
 
 /**
  * Try to extract a JSON tool call object from a string.
- * Expects `{"name": "...", "arguments": {...}}` format.
+ * Returns null if parsing fails.
  */
 function tryParseToolCallJson(
     jsonStr: string,
 ): { name: string; arguments: Record<string, unknown> } | null {
     const trimmed = jsonStr.trim();
     if (!trimmed) return null;
+
     try {
         const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed.name === "string") {
-            return { name: parsed.name, arguments: parsed.arguments ?? {} };
+        if (parsed && typeof parsed === "object" && "name" in parsed) {
+            return {
+                name: parsed.name,
+                arguments: parsed.arguments || {},
+            };
         }
     } catch {
-        // Not valid JSON
+        // ignore parse errors
     }
     return null;
 }
 
 /**
- * Parse tool call tags from model output.
- *
- * Handles multiple formats used by Featherless models:
- *
- * 1. `<tool_call>{"name": "...", "arguments": {...}}</tool_call>` (Qwen3, most models)
- * 2. `<tool_call>{"name": "...", "arguments": {...}}` (QRWKV - sometimes omits closing tag)
- * 3. `<function-call><name>...</name><arguments>{...}</arguments></function-call>` (RWKV6Qwen2.5)
+ * Parse tool calls from text content (Qwen3 format only).
+ * Supports: `<tool_call>{...}</tool_call>` (Qwen3 pure models)
  */
 /** @internal Exported for testing */
 export function parseToolCallTags(text: string): ParsedContent {
@@ -77,105 +68,31 @@ export function parseToolCallTags(text: string): ParsedContent {
     let searchFrom = 0;
 
     while (searchFrom < text.length) {
-        // Try <tool_call> format first
-        const toolCallIdx = text.indexOf("<tool_call>", searchFrom);
-        // Try <function-call> format
-        const funcCallIdx = text.indexOf("<function-call>", searchFrom);
+        const openTag = "<tool_call>";
+        const closeTag = "</tool_call>";
+        const openIdx = text.indexOf(openTag, searchFrom);
 
-        // Pick whichever comes first
-        const useToolCall =
-            toolCallIdx !== -1 &&
-            (funcCallIdx === -1 || toolCallIdx <= funcCallIdx);
-        const useFuncCall =
-            funcCallIdx !== -1 &&
-            (toolCallIdx === -1 || funcCallIdx < toolCallIdx);
-
-        if (!useToolCall && !useFuncCall) {
+        if (openIdx === -1) {
             textBefore += text.slice(searchFrom);
             break;
         }
 
-        if (useToolCall) {
-            const openTag = "<tool_call>";
-            const closeTag = "</tool_call>";
-            const openIdx = toolCallIdx;
-            textBefore += text.slice(searchFrom, openIdx);
+        textBefore += text.slice(searchFrom, openIdx);
+        const closeIdx = text.indexOf(closeTag, openIdx + openTag.length);
 
-            const closeIdx = text.indexOf(closeTag, openIdx + openTag.length);
-            let jsonStr: string;
-
-            if (closeIdx !== -1) {
-                jsonStr = text.slice(openIdx + openTag.length, closeIdx);
-                searchFrom = closeIdx + closeTag.length;
-            } else {
-                // No closing tag (QRWKV) - take everything after the open tag
-                jsonStr = text.slice(openIdx + openTag.length);
-                searchFrom = text.length;
-            }
-
+        if (closeIdx !== -1) {
+            const jsonStr = text.slice(openIdx + openTag.length, closeIdx);
             const parsed = tryParseToolCallJson(jsonStr);
             if (parsed) {
                 toolCalls.push(parsed);
             } else {
-                textBefore += text.slice(
-                    openIdx,
-                    closeIdx !== -1 ? closeIdx + closeTag.length : text.length,
-                );
+                textBefore += text.slice(openIdx, closeIdx + closeTag.length);
             }
-        } else if (useFuncCall) {
-            const openTag = "<function-call>";
-            const closeTag = "</function-call>";
-            // Also accept </functioncall> (some models emit this)
-            const openIdx = funcCallIdx;
-            textBefore += text.slice(searchFrom, openIdx);
-
-            let closeIdx = text.indexOf(closeTag, openIdx + openTag.length);
-            let actualCloseLen = closeTag.length;
-            if (closeIdx === -1) {
-                closeIdx = text.indexOf(
-                    "</functioncall>",
-                    openIdx + openTag.length,
-                );
-                actualCloseLen = "</functioncall>".length;
-            }
-
-            if (closeIdx !== -1) {
-                const inner = text.slice(openIdx + openTag.length, closeIdx);
-                // Try JSON format first
-                const jsonParsed = tryParseToolCallJson(inner);
-                if (jsonParsed) {
-                    toolCalls.push(jsonParsed);
-                } else {
-                    // Try XML-like <name>...</name><arguments>...</arguments> format
-                    const nameMatch = inner.match(/<name>\s*(.*?)\s*<\/name>/s);
-                    const argsMatch = inner.match(
-                        /<arguments>\s*([\s\S]*?)\s*<\/arguments>/s,
-                    );
-                    if (nameMatch) {
-                        let args: Record<string, unknown> = {};
-                        if (argsMatch) {
-                            try {
-                                args = JSON.parse(argsMatch[1].trim());
-                            } catch {
-                                // ignore parse failure
-                            }
-                        }
-                        toolCalls.push({
-                            name: nameMatch[1].trim(),
-                            arguments: args,
-                        });
-                    } else {
-                        textBefore += text.slice(
-                            openIdx,
-                            closeIdx + actualCloseLen,
-                        );
-                    }
-                }
-                searchFrom = closeIdx + actualCloseLen;
-            } else {
-                textBefore += text.slice(openIdx);
-                searchFrom = text.length;
-            }
+            searchFrom = closeIdx + closeTag.length;
+        } else {
+            // No closing tag - treat as regular text
+            textBefore += text.slice(openIdx);
+            searchFrom = text.length;
         }
     }
 
@@ -188,806 +105,825 @@ export function parseToolCallTags(text: string): ParsedContent {
 
 function convertMessages(
     context: Context,
-): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-    const params: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    model: Model<"openai-completions">,
+): Array<
+    | { role: "user" | "assistant" | "tool"; content: string }
+    | {
+          role: "assistant";
+          content: Array<{ type: "text"; text: string } | ToolCall>;
+      }
+> {
+    const messages: Array<
+        | { role: "user" | "assistant" | "tool"; content: string }
+        | {
+              role: "assistant";
+              content: Array<{ type: "text"; text: string } | ToolCall>;
+          }
+    > = [];
 
-    if (context.systemPrompt) {
-        params.push({ role: "system", content: context.systemPrompt });
-    }
-
-    for (let i = 0; i < context.messages.length; i++) {
-        const msg = context.messages[i];
-
-        if (msg.role === "user") {
-            const content =
-                typeof msg.content === "string"
-                    ? msg.content
-                    : msg.content
-                          .filter((c): c is TextContent => c.type === "text")
-                          .map((c) => c.text)
-                          .join("\n");
-            if (content) params.push({ role: "user", content });
+    for (const msg of context.messages) {
+        if (msg.role === "user" || msg.role === "system") {
+            messages.push({ role: "user", content: msg.content });
         } else if (msg.role === "assistant") {
-            const textBlocks = msg.content.filter(
-                (b): b is TextContent => b.type === "text",
-            );
-            const toolCallBlocks = msg.content.filter(
-                (b): b is ToolCall => b.type === "toolCall",
-            );
+            const textBlocks: Array<{ type: "text"; text: string }> = [];
+            const toolCallBlocks: ToolCall[] = [];
 
-            const assistantMsg: OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam =
-                {
-                    role: "assistant",
-                    content: textBlocks.map((b) => b.text).join("") || null,
-                };
-
-            if (toolCallBlocks.length > 0) {
-                // Use native OpenAI tool_calls format
-                assistantMsg.tool_calls = toolCallBlocks.map((tc) => ({
-                    id: tc.id,
-                    type: "function" as const,
-                    function: {
-                        name: tc.name,
-                        arguments: JSON.stringify(tc.arguments),
-                    },
-                }));
+            for (const block of msg.content) {
+                if (block.type === "text") {
+                    textBlocks.push({ type: "text", text: block.text });
+                } else if (block.type === "tool_call") {
+                    toolCallBlocks.push({
+                        type: "function" as const,
+                        id: block.tool_call_id || `call_${Date.now()}`,
+                        function: {
+                            name: block.name,
+                            arguments: block.arguments,
+                        },
+                    });
+                }
             }
 
-            params.push(assistantMsg);
-        } else if (msg.role === "toolResult") {
-            // Each tool result is a separate "tool" role message
-            const toolMsg = msg as ToolResultMessage;
-            const textResult = toolMsg.content
-                .filter((c): c is TextContent => c.type === "text")
-                .map((c) => c.text)
-                .join("\n");
-            params.push({
-                role: "tool" as const,
-                tool_call_id: toolMsg.toolCallId,
-                content: textResult,
+            if (toolCallBlocks.length > 0) {
+                messages.push({
+                    role: "assistant",
+                    content: [...textBlocks, ...toolCallBlocks],
+                });
+            } else if (textBlocks.length > 0) {
+                messages.push({
+                    role: "assistant",
+                    content: textBlocks[0].text,
+                });
+            }
+        } else if (msg.role === "tool") {
+            const textResult =
+                typeof msg.content === "string"
+                    ? msg.content
+                    : JSON.stringify(msg.content);
+            messages.push({
+                role: "tool",
+                content: `{\"result\": ${JSON.stringify(textResult)}}`,
             });
         }
     }
 
-    return params;
+    return messages;
 }
 
 function convertTools(
-    tools: Tool[],
-): OpenAI.Chat.Completions.ChatCompletionTool[] {
+    tools: Array<{ name: string; description: string }>,
+): Array<{
+    type: "function";
+    function: {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+    };
+}> {
     return tools.map((tool) => ({
-        type: "function" as const,
+        type: "function",
         function: {
             name: tool.name,
             description: tool.description,
-            parameters: tool.parameters as Record<string, unknown>,
+            parameters: {},
         },
     }));
 }
 
 // =============================================================================
-// Streaming implementation
+// Constants
 // =============================================================================
 
-/**
- * Longest opening tag we need to detect: "<function-call>" (15 chars).
- * We hold back up to this many chars to avoid emitting partial tag starts.
- */
-const TAG_OPENS = ["<tool_call>", "<function-call>"] as const;
-const TAG_CLOSE_MAP: Record<string, string[]> = {
-    "<tool_call>": ["</tool_call>"],
-    "<function-call>": ["</function-call>", "</functioncall>"],
+const TAG_OPENS = ["<tool_call>", "<function-call>"];
+const TAG_CLOSE_MAP: Record<string, string> = {
+    "<tool_call>": "</tool_call>",
+    "<function-call>": "</function-call>",
 };
-const MAX_TAG_OPEN_LEN = 15; // length of "<function-call>"
+const MAX_TAG_OPEN_LEN = Math.max(...TAG_OPENS.map((t) => t.length));
 
 /**
- * Find how many trailing characters of `text` (from `from` onwards)
- * could be the start of one of our tag opens. We hold these back
- * so we don't emit a partial `<tool_` as visible text.
+ * Check if text ends with a partial tool-call tag prefix.
+ * Returns length of the partial prefix if found, 0 otherwise.
  */
-function trailingTagPrefixLen(text: string, from: number): number {
+function trailingTagPrefixLen(text: string): number {
     let best = 0;
-    for (
-        let len = 1;
-        len <= Math.min(MAX_TAG_OPEN_LEN - 1, text.length - from);
-        len++
-    ) {
-        const tail = text.slice(text.length - len);
-        for (const tag of TAG_OPENS) {
-            if (tag.startsWith(tail)) {
-                best = len;
-            }
+    for (const openTag of TAG_OPENS) {
+        const tail = text.slice(-openTag.length);
+        if (openTag.startsWith(tail)) {
+            best = Math.max(best, tail.length);
         }
     }
     return best;
 }
 
-function streamFeatherless(
-    model: Model<Api>,
+// =============================================================================
+// Main streamSimple implementation
+// =============================================================================
+
+export async function* streamSimple(
+    model: Model<"openai-completions">,
     context: Context,
     options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-    const stream = createAssistantMessageEventStream();
+    const stream: AssistantMessageEventStream = [];
+    const output: {
+        role: "assistant";
+        content: Array<{ type: "text"; text: string } | ToolCall>;
+        usage?: {
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite: number;
+            totalTokens: number;
+            cost?: {
+                input: number;
+                output: number;
+                cacheRead: number;
+                cacheWrite: number;
+                total: number;
+            };
+        };
+        stopReason?: string;
+        timestamp?: number;
+    } = {
+        role: "assistant",
+        content: [],
+        usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+        },
+    };
 
-    (async () => {
-        const output: AssistantMessage = {
-            role: "assistant",
-            content: [],
-            api: model.api,
-            provider: model.provider,
-            model: model.id,
-            usage: {
-                input: 0,
-                output: 0,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 0,
-                cost: {
-                    input: 0,
-                    output: 0,
-                    cacheRead: 0,
-                    cacheWrite: 0,
-                    total: 0,
-                },
+    const apiKey = model.credentials?.apiKey;
+    if (!apiKey) {
+        throw new Error("Featherless API key not configured");
+    }
+
+    const client = new OpenAI({
+        baseURL: model.baseUrl,
+        apiKey,
+        dangerouslyAllowBrowser: true,
+    });
+
+    const params: any = {
+        model: model.id,
+        messages: convertMessages(context, model),
+        stream: true,
+    };
+
+    if (options?.temperature !== undefined) {
+        params.temperature = options.temperature;
+    }
+
+    if (context.tools && context.tools.length > 0) {
+        params.tools = convertTools(context.tools);
+    }
+
+    // Apply family-specific parameters
+    if (model.id.includes("Qwen3")) {
+        const { applyQwen3Params } = await import("./models/qwen3");
+        applyQwen3Params(params, options);
+    }
+
+    // Get actual input token count via Featherless tokenize API
+    let inputTokenCount = 0;
+    try {
+        const tokenizeResp = await fetch(`${model.baseUrl}/tokenize`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
             },
-            stopReason: "stop",
-            timestamp: Date.now(),
+            body: JSON.stringify({
+                model: model.id,
+                text: JSON.stringify(params.messages),
+            }),
+        });
+        if (tokenizeResp.ok) {
+            const tokenizeData = (await tokenizeResp.json()) as {
+                tokens: number[];
+            };
+            inputTokenCount = tokenizeData.tokens.length;
+        }
+    } catch {
+        // Fall back to chars/4 estimate if tokenize fails
+        inputTokenCount = Math.ceil(JSON.stringify(params.messages).length / 4);
+    }
+
+    const openaiStream = await client.chat.completions.create(params, {
+        signal: options?.signal,
+    });
+
+    stream.push({ type: "start", partial: output });
+
+    // -- Streaming state --
+    let inThinking = false;
+    let inText = false;
+    let thinkingIndex = -1;
+    let textIndex = -1;
+    let toolCallCount = 0;
+    let outputTokenCount = 0;
+
+    // Native tool_calls accumulator (OpenAI streaming format)
+    // Each entry accumulates incremental name/arguments deltas
+    const nativeToolCalls = new Map<
+        number,
+        { id: string; name: string; arguments: string }
+    >();
+    let gotNativeToolCalls = false;
+
+    // Text-based tool-call tag parser state (fallback for unsupported models)
+    let inTag = false;
+    let tagOpen = "";
+    let tagBuffer = "";
+
+    function flushText() {
+        if (inText && tagBuffer) {
+            const textBlock: { type: "text"; text: string } = {
+                type: "text",
+                text: tagBuffer,
+            };
+            output.content.push(textBlock);
+
+            stream.push({
+                type: "content",
+                contentIndex: output.content.length - 1,
+                partial: true,
+            });
+
+            stream.push({
+                type: "content",
+                contentIndex: output.content.length - 1,
+                delta: textBlock,
+                partial: true,
+            });
+
+            tagBuffer = "";
+        }
+    }
+
+    function closeText() {
+        if (inText) {
+            flushText();
+            inText = false;
+
+            stream.push({
+                type: "content",
+                contentIndex: textIndex,
+                content: output.content[textIndex],
+                partial: false,
+            });
+        }
+    }
+
+    function emitToolCall(
+        name: string,
+        args: Record<string, unknown>,
+        id: string,
+    ) {
+        const toolCall: ToolCall = {
+            type: "function",
+            id,
+            function: {
+                name,
+                arguments: args,
+            },
         };
 
-        try {
-            const apiKey = options?.apiKey ?? "";
-            const client = new OpenAI({
-                apiKey,
-                baseURL: model.baseUrl,
-                dangerouslyAllowBrowser: true,
-            });
+        const idx = output.content.length;
+        output.content.push(toolCall);
 
-            const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming =
-                {
-                    model: model.id,
-                    messages: convertMessages(context),
-                    stream: true,
-                };
+        stream.push({
+            type: "content",
+            contentIndex: idx,
+            partial: true,
+        });
 
-            if (options?.maxTokens) {
-                (params as any).max_tokens = options.maxTokens;
-            }
+        stream.push({
+            type: "content",
+            contentIndex: idx,
+            delta: toolCall,
+            partial: true,
+        });
 
-            if (options?.temperature !== undefined) {
-                params.temperature = options.temperature;
-            }
+        stream.push({
+            type: "content",
+            contentIndex: idx,
+            partial: false,
+        });
+    }
 
-            if (context.tools && context.tools.length > 0) {
-                params.tools = convertTools(context.tools);
-            }
+    function parseAndEmitTag(tagContent: string) {
+        const parsed = parseToolCallTags(tagContent);
+        const jsonParsed = tryParseToolCallJson(parsed.textBefore);
 
-            // Apply family-specific parameters
-            if (model.id.includes("Qwen3")) {
-                const { applyQwen3Params } = await import("./models/qwen3");
-                applyQwen3Params(params, options);
-            }
-
-            // Get actual input token count via Featherless tokenize API
-            let inputTokenCount = 0;
-            try {
-                const tokenizeResp = await fetch(`${model.baseUrl}/tokenize`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify({
-                        model: model.id,
-                        text: JSON.stringify(params.messages),
-                    }),
-                });
-                if (tokenizeResp.ok) {
-                    const tokenizeData = (await tokenizeResp.json()) as {
-                        tokens: number[];
-                    };
-                    inputTokenCount = tokenizeData.tokens.length;
+        if (jsonParsed) {
+            let args: Record<string, unknown> = jsonParsed.arguments || {};
+            if (typeof args === "string") {
+                try {
+                    args = JSON.parse(args);
+                } catch {
+                    args = {};
                 }
-            } catch {
-                // Fall back to chars/4 estimate if tokenize fails
-                inputTokenCount = Math.ceil(
-                    JSON.stringify(params.messages).length / 4,
+            }
+
+            const nameMatch = jsonParsed.name;
+            if (nameMatch) {
+                emitToolCall(
+                    nameMatch,
+                    args,
+                    `call_${Date.now()}_${toolCallCount++}`,
                 );
             }
+        }
 
-            const openaiStream = await client.chat.completions.create(params, {
-                signal: options?.signal,
-            });
-
-            stream.push({ type: "start", partial: output });
-
-            // -- Streaming state --
-            let inThinking = false;
-            let inText = false;
-            let thinkingIndex = -1;
-            let textIndex = -1;
-            let toolCallCount = 0;
-            let outputTokenCount = 0;
-
-            // Native tool_calls accumulator (OpenAI streaming format)
-            // Each entry accumulates incremental name/arguments deltas
-            const nativeToolCalls = new Map<
-                number,
-                { id: string; name: string; arguments: string }
-            >();
-            let gotNativeToolCalls = false;
-
-            // Text-based tool-call tag parser state (fallback for unsupported models)
-            let pendingText = ""; // buffered text not yet emitted (might contain tag start)
-            let inTag = false; // currently inside a <tool_call> or <function-call>
-            let tagOpen = ""; // which opening tag we matched
-            let tagBuffer = ""; // content inside the tag so far
-
-            // -- Helper: emit confirmed text as a text_delta --
-            function flushText(text: string) {
-                if (!text) return;
-                if (!inText) {
-                    const textBlock: TextContent = { type: "text", text: "" };
-                    output.content.push(textBlock);
-                    textIndex = output.content.length - 1;
-                    inText = true;
-                    stream.push({
-                        type: "text_start",
-                        contentIndex: textIndex,
-                        partial: output,
-                    });
-                }
-                (output.content[textIndex] as TextContent).text += text;
-                stream.push({
-                    type: "text_delta",
-                    contentIndex: textIndex,
-                    delta: text,
-                    partial: output,
-                });
-            }
-
-            // -- Helper: close the current text block --
-            function closeText() {
-                if (inText) {
-                    stream.push({
-                        type: "text_end",
-                        contentIndex: textIndex,
-                        content: (output.content[textIndex] as TextContent)
-                            .text,
-                        partial: output,
-                    });
-                    inText = false;
+        for (const toolCall of parsed.toolCalls) {
+            let args = toolCall.arguments;
+            if (typeof args === "string") {
+                try {
+                    args = JSON.parse(args);
+                } catch {
+                    args = {};
                 }
             }
+            emitToolCall(
+                toolCall.name,
+                args,
+                `call_${Date.now()}_${toolCallCount++}`,
+            );
+        }
+    }
 
-            // -- Helper: emit a parsed tool call --
-            function emitToolCall(name: string, args: Record<string, unknown>) {
-                closeText();
-                const toolCall: ToolCall = {
-                    type: "toolCall",
-                    id: `call_${Date.now()}_${toolCallCount++}`,
-                    name,
-                    arguments: args as Record<string, any>,
-                };
-                output.content.push(toolCall);
-                const idx = output.content.length - 1;
-                stream.push({
-                    type: "toolcall_start",
-                    contentIndex: idx,
-                    partial: output,
-                });
-                stream.push({
-                    type: "toolcall_delta",
-                    contentIndex: idx,
-                    delta: JSON.stringify(args),
-                    partial: output,
-                });
-                stream.push({
-                    type: "toolcall_end",
-                    contentIndex: idx,
-                    toolCall,
-                    partial: output,
-                });
-                output.stopReason = "toolUse";
+    function processContent(deltaText: string) {
+        // Check for tool-call tags
+        const closeTags = ["</tool_call>", "</function-call>"];
+        let earliestIdx = Infinity;
+        let matchedOpen = "";
+
+        for (const openTag of TAG_OPENS) {
+            const idx = deltaText.indexOf(openTag);
+            if (idx !== -1 && idx < earliestIdx) {
+                earliestIdx = idx;
+                matchedOpen = openTag;
+            }
+        }
+
+        if (earliestIdx !== Infinity) {
+            // Found a tag
+            const idx = earliestIdx;
+            const openTag = matchedOpen;
+            const closeTag = TAG_CLOSE_MAP[openTag];
+
+            // Text before the tag
+            const beforeTag = deltaText.slice(0, idx);
+            if (beforeTag) {
+                tagBuffer += beforeTag;
             }
 
-            // -- Helper: parse inner tag content and emit tool call --
-            function parseAndEmitTag(inner: string, openTag: string) {
-                if (openTag === "<tool_call>") {
-                    const parsed = tryParseToolCallJson(inner);
-                    if (parsed) emitToolCall(parsed.name, parsed.arguments);
+            // Find closing tag
+            const closeIdx = deltaText.indexOf(closeTag, idx + openTag.length);
+            if (closeIdx !== -1) {
+                // Complete tag in this chunk
+                const inner = deltaText.slice(idx + openTag.length, closeIdx);
+                const afterTag = deltaText.slice(closeIdx + closeTag.length);
+
+                if (!inTag) {
+                    // New tag
+                    tagBuffer += openTag + inner + closeTag;
+                    parseAndEmitTag(tagBuffer);
+                    tagBuffer = afterTag;
                 } else {
-                    // <function-call>: try JSON first, then XML
-                    const jsonParsed = tryParseToolCallJson(inner);
-                    if (jsonParsed) {
-                        emitToolCall(jsonParsed.name, jsonParsed.arguments);
-                    } else {
-                        const nameMatch = inner.match(
-                            /<name>\s*(.*?)\s*<\/name>/s,
-                        );
-                        const argsMatch = inner.match(
-                            /<arguments>\s*([\s\S]*?)\s*<\/arguments>/s,
-                        );
-                        if (nameMatch) {
-                            let args: Record<string, unknown> = {};
-                            if (argsMatch) {
-                                try {
-                                    args = JSON.parse(argsMatch[1].trim());
-                                } catch {
-                                    // ignore
-                                }
-                            }
-                            emitToolCall(nameMatch[1].trim(), args);
-                        }
-                    }
-                }
-            }
-
-            // -- Helper: process a content delta through the streaming parser --
-            function processContent(delta: string) {
-                if (inTag) {
-                    tagBuffer += delta;
-                    // Check for any matching closing tag
-                    const closeTags = TAG_CLOSE_MAP[tagOpen] ?? [];
-                    for (const ct of closeTags) {
-                        const closeIdx = tagBuffer.indexOf(ct);
-                        if (closeIdx !== -1) {
-                            const inner = tagBuffer.slice(0, closeIdx);
-                            const remainder = tagBuffer.slice(
-                                closeIdx + ct.length,
-                            );
-                            inTag = false;
-                            tagBuffer = "";
-                            parseAndEmitTag(inner, tagOpen);
-                            // Process anything after the close tag
-                            if (remainder) processContent(remainder);
-                            return;
-                        }
-                    }
-                    // Still waiting for close tag
-                    return;
-                }
-
-                // Not in a tag - accumulate and look for tag opens
-                pendingText += delta;
-
-                // Look for a complete tag open in pendingText
-                let earliestIdx = -1;
-                let matchedOpen = "";
-                for (const tag of TAG_OPENS) {
-                    const idx = pendingText.indexOf(tag);
-                    if (
-                        idx !== -1 &&
-                        (earliestIdx === -1 || idx < earliestIdx)
-                    ) {
-                        earliestIdx = idx;
-                        matchedOpen = tag;
-                    }
-                }
-
-                if (earliestIdx !== -1) {
-                    // Emit text before the tag
-                    flushText(pendingText.slice(0, earliestIdx));
-                    // Enter tag mode
-                    const afterTag = pendingText.slice(
-                        earliestIdx + matchedOpen.length,
-                    );
-                    pendingText = "";
-                    inTag = true;
-                    tagOpen = matchedOpen;
-                    tagBuffer = "";
-                    // Process content after the opening tag (may contain close tag already)
-                    if (afterTag) processContent(afterTag);
-                    return;
-                }
-
-                // No complete tag found - emit text that's safe (hold back potential partial tag at end)
-                const holdBack = trailingTagPrefixLen(pendingText, 0);
-                const safeLen = pendingText.length - holdBack;
-                if (safeLen > 0) {
-                    flushText(pendingText.slice(0, safeLen));
-                    pendingText = pendingText.slice(safeLen);
-                }
-            }
-
-            for await (const chunk of openaiStream) {
-                if (!chunk || typeof chunk !== "object") continue;
-
-                output.responseId ||= chunk.id;
-
-                if (chunk.usage) {
-                    output.usage.input = chunk.usage.prompt_tokens || 0;
-                    output.usage.output = chunk.usage.completion_tokens || 0;
-                    output.usage.totalTokens =
-                        output.usage.input + output.usage.output;
-                    calculateCost(model, output.usage);
-                }
-                // Count streamed output tokens
-                outputTokenCount++;
-
-                const choice = chunk.choices?.[0];
-                if (!choice) continue;
-
-                if (choice.finish_reason) {
-                    const mapped = mapFinishReason(choice.finish_reason);
-                    output.stopReason = mapped;
-                }
-
-                if (!choice.delta) continue;
-
-                // Handle reasoning delta (Qwen3 thinking)
-                const reasoning = (choice.delta as any).reasoning;
-                if (reasoning) {
-                    if (!inThinking) {
-                        const thinkingBlock: ThinkingContent = {
-                            type: "thinking",
-                            thinking: "",
-                        };
-                        output.content.push(thinkingBlock);
-                        thinkingIndex = output.content.length - 1;
-                        inThinking = true;
-                        stream.push({
-                            type: "thinking_start",
-                            contentIndex: thinkingIndex,
-                            partial: output,
-                        });
-                    }
-
-                    (
-                        output.content[thinkingIndex] as ThinkingContent
-                    ).thinking += reasoning;
-                    stream.push({
-                        type: "thinking_delta",
-                        contentIndex: thinkingIndex,
-                        delta: reasoning,
-                        partial: output,
-                    });
-                }
-
-                // Handle content delta
-                if (choice.delta.content) {
-                    // Close thinking block if we were in one
-                    if (inThinking) {
-                        stream.push({
-                            type: "thinking_end",
-                            contentIndex: thinkingIndex,
-                            content: (
-                                output.content[thinkingIndex] as ThinkingContent
-                            ).thinking,
-                            partial: output,
-                        });
-                        inThinking = false;
-                    }
-
-                    // Only parse text tags if we haven't gotten native tool_calls
-                    if (!gotNativeToolCalls) {
-                        processContent(choice.delta.content);
-                    }
-                    // If we got native tool_calls, ignore content (it's duplicate <tool_call> tags)
-                }
-
-                // Handle native delta.tool_calls (Qwen3, Kimi-K2, etc.)
-                if (choice.delta.tool_calls) {
-                    gotNativeToolCalls = true;
-
-                    // Close thinking if needed
-                    if (inThinking) {
-                        stream.push({
-                            type: "thinking_end",
-                            contentIndex: thinkingIndex,
-                            content: (
-                                output.content[thinkingIndex] as ThinkingContent
-                            ).thinking,
-                            partial: output,
-                        });
-                        inThinking = false;
-                    }
-
-                    for (const tc of choice.delta.tool_calls) {
-                        const idx = tc.index ?? 0;
-                        let entry = nativeToolCalls.get(idx);
-                        if (!entry) {
-                            entry = {
-                                id:
-                                    tc.id ??
-                                    `call_${Date.now()}_${toolCallCount++}`,
-                                name: "",
-                                arguments: "",
-                            };
-                            nativeToolCalls.set(idx, entry);
-                        }
-                        if (tc.function?.name) entry.name += tc.function.name;
-                        if (tc.function?.arguments)
-                            entry.arguments += tc.function.arguments;
-                    }
-                }
-            }
-
-            // -- Finalize after stream ends --
-
-            // Emit native tool calls if we got them
-            if (gotNativeToolCalls && nativeToolCalls.size > 0) {
-                closeText();
-                for (const [, entry] of nativeToolCalls) {
-                    let args: Record<string, unknown> = {};
-                    try {
-                        args = JSON.parse(entry.arguments);
-                    } catch {
-                        // ignore parse failure
-                    }
-                    const toolCall: ToolCall = {
-                        type: "toolCall",
-                        id: entry.id,
-                        name: entry.name,
-                        arguments: args as Record<string, any>,
-                    };
-                    output.content.push(toolCall);
-                    const idx = output.content.length - 1;
-                    stream.push({
-                        type: "toolcall_start",
-                        contentIndex: idx,
-                        partial: output,
-                    });
-                    stream.push({
-                        type: "toolcall_delta",
-                        contentIndex: idx,
-                        delta: entry.arguments,
-                        partial: output,
-                    });
-                    stream.push({
-                        type: "toolcall_end",
-                        contentIndex: idx,
-                        toolCall,
-                        partial: output,
-                    });
-                }
-                output.stopReason = "toolUse";
-            }
-
-            // Fallback: handle text-based tool call tags (unsupported models)
-            if (!gotNativeToolCalls) {
-                // Handle unclosed tool call tag (QRWKV omits closing tag)
-                if (inTag && tagBuffer) {
-                    parseAndEmitTag(tagBuffer, tagOpen);
+                    // Continuation of previous tag
+                    tagBuffer += openTag + inner + closeTag;
+                    parseAndEmitTag(tagBuffer);
+                    tagBuffer = afterTag;
                     inTag = false;
                 }
-
-                // Flush any remaining held-back text
-                if (pendingText) {
-                    flushText(pendingText);
-                    pendingText = "";
+            } else {
+                // Incomplete tag
+                if (!inTag) {
+                    // Start of new tag
+                    tagBuffer += deltaText.slice(idx);
+                    inTag = true;
+                    tagOpen = openTag;
+                } else {
+                    // Continuation of existing tag
+                    tagBuffer += deltaText;
                 }
             }
+        } else {
+            // No tags found
+            if (inTag) {
+                // Check if this completes a previous tag
+                const closeTag = TAG_CLOSE_MAP[tagOpen];
+                const closeIdx = deltaText.indexOf(closeTag);
+                if (closeIdx !== -1) {
+                    tagBuffer += deltaText.slice(0, closeIdx + closeTag.length);
+                    parseAndEmitTag(tagBuffer);
+                    tagBuffer = deltaText.slice(closeIdx + closeTag.length);
+                    inTag = false;
+                } else {
+                    tagBuffer += deltaText;
+                }
+            } else {
+                tagBuffer += deltaText;
+            }
+        }
+    }
 
-            // Close any open blocks
-            if (inThinking) {
+    for await (const choice of openaiStream) {
+        const delta = choice.choices[0]?.delta;
+        if (!delta) continue;
+
+        // -- Thinking blocks --
+        const reasoning = (delta as any).reasoning;
+        if (reasoning) {
+            if (!inThinking) {
+                const thinkingBlock: { type: "text"; text: string } = {
+                    type: "text",
+                    text: reasoning,
+                };
+                output.content.push(thinkingBlock);
+                thinkingIndex = output.content.length - 1;
+
                 stream.push({
-                    type: "thinking_end",
+                    type: "content",
                     contentIndex: thinkingIndex,
-                    content: (output.content[thinkingIndex] as ThinkingContent)
-                        .thinking,
-                    partial: output,
+                    delta: thinkingBlock,
+                    partial: true,
+                });
+
+                inThinking = true;
+            } else {
+                const lastThinking = output.content[thinkingIndex] as {
+                    type: "text";
+                    text: string;
+                };
+                lastThinking.text += reasoning;
+
+                stream.push({
+                    type: "content",
+                    contentIndex: thinkingIndex,
+                    delta: { type: "text" as const, text: reasoning },
+                    partial: true,
                 });
             }
-            closeText();
+            continue;
+        }
 
-            // Featherless doesn't return usage for streaming requests.
-            // Estimate so pi can trigger auto-compaction.
-            if (output.usage.totalTokens === 0) {
-                output.usage.input = inputTokenCount;
-                output.usage.output = outputTokenCount;
-                output.usage.totalTokens = inputTokenCount + outputTokenCount;
-            }
+        // -- Native tool_calls (OpenAI format) --
+        if (delta.tool_calls) {
+            gotNativeToolCalls = true;
+            for (const toolCallDelta of delta.tool_calls) {
+                if (toolCallDelta.index !== undefined) {
+                    const idx = toolCallDelta.index;
+                    let entry = nativeToolCalls.get(idx);
+                    if (!entry && toolCallDelta.id) {
+                        entry = {
+                            id: toolCallDelta.id,
+                            name: "",
+                            arguments: "",
+                        };
+                        nativeToolCalls.set(idx, entry);
+                    }
 
-            if (options?.signal?.aborted) {
-                throw new Error("Request was aborted");
-            }
+                    if (entry) {
+                        if (toolCallDelta.function_call?.name) {
+                            entry.name += toolCallDelta.function_call.name;
+                        }
+                        if (toolCallDelta.function_call?.arguments) {
+                            entry.arguments +=
+                                toolCallDelta.function_call.arguments;
+                        }
 
-            stream.push({
-                type: "done",
-                reason: output.stopReason as "stop" | "length" | "toolUse",
-                message: output,
-            });
-            stream.end();
-        } catch (error) {
-            output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-            // Extract detailed error info from OpenAI API errors
-            let errorMsg =
-                error instanceof Error ? error.message : String(error);
-            if (error && typeof error === "object" && "status" in error) {
-                const apiErr = error as {
-                    status: number;
-                    error?: { message?: string; type?: string };
-                };
-                if (apiErr.error?.message) {
-                    errorMsg = `${apiErr.status}: ${apiErr.error.message}`;
+                        // Emit complete tool calls
+                        if (
+                            toolCallDelta.function_call?.name &&
+                            toolCallDelta.function_call?.arguments
+                        ) {
+                            let args: Record<string, unknown> = {};
+                            try {
+                                args = JSON.parse(entry.arguments);
+                            } catch {
+                                args = {};
+                            }
+
+                            const toolCall: ToolCall = {
+                                type: "function",
+                                id: entry.id,
+                                function: {
+                                    name: entry.name,
+                                    arguments: args,
+                                },
+                            };
+
+                            const idx = output.content.length;
+                            output.content.push(toolCall);
+
+                            stream.push({
+                                type: "content",
+                                contentIndex: idx,
+                                partial: true,
+                            });
+
+                            stream.push({
+                                type: "content",
+                                contentIndex: idx,
+                                delta: toolCall,
+                                partial: true,
+                            });
+
+                            stream.push({
+                                type: "content",
+                                contentIndex: idx,
+                                partial: false,
+                            });
+                        }
+                    }
                 }
             }
-            output.errorMessage = errorMsg;
-            stream.push({
-                type: "error",
-                reason: output.stopReason,
-                error: output,
-            });
-            stream.end();
+            continue;
         }
-    })();
 
-    return stream;
+        // -- Regular text content --
+        const text = delta.content;
+        if (text) {
+            if (!inText) {
+                const textBlock: { type: "text"; text: string } = {
+                    type: "text",
+                    text: "",
+                };
+                output.content.push(textBlock);
+                textIndex = output.content.length - 1;
+
+                stream.push({
+                    type: "content",
+                    contentIndex: textIndex,
+                    delta: textBlock,
+                    partial: true,
+                });
+
+                inText = true;
+            }
+
+            if (inTag) {
+                processContent(text);
+            } else {
+                tagBuffer += text;
+                const trailing = trailingTagPrefixLen(tagBuffer);
+                if (trailing > 0) {
+                    // Hold back potential partial tag
+                    const safeLen = tagBuffer.length - trailing;
+                    const holdBack = tagBuffer.slice(safeLen);
+                    tagBuffer = tagBuffer.slice(0, safeLen);
+                    processContent(tagBuffer);
+                    tagBuffer = holdBack;
+                } else {
+                    processContent(tagBuffer);
+                    tagBuffer = "";
+                }
+            }
+
+            outputTokenCount++;
+        }
+    }
+
+    // -- Stream completion --
+    flushText();
+    closeText();
+
+    if (inTag && tagBuffer) {
+        // Unclosed tag at end of stream - treat as text
+        if (inText) {
+            const lastText = output.content[textIndex] as {
+                type: "text";
+                text: string;
+            };
+            lastText.text += tagBuffer;
+
+            stream.push({
+                type: "content",
+                contentIndex: textIndex,
+                content: lastText,
+                partial: false,
+            });
+        }
+    }
+
+    // Update usage with actual token counts
+    output.usage = {
+        input: inputTokenCount,
+        output: outputTokenCount,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: inputTokenCount + outputTokenCount,
+    };
+
+    const choice = openaiStream.getFinalChoice();
+    if (choice) {
+        const mapped = mapFinishReason(choice.finish_reason);
+        if (mapped) {
+            stream.push({
+                type: "finish",
+                reason: mapped.reason,
+                message: mapped.message,
+            });
+        }
+    }
+
+    return yield* stream;
 }
 
-function mapFinishReason(reason: string): StopReason {
+// =============================================================================
+// Finish reason mapping
+// =============================================================================
+
+function mapFinishReason(
+    reason: string | null | undefined,
+): { reason: string; message: string } | null {
     switch (reason) {
         case "stop":
-            return "stop";
+            return { reason: "complete", message: "Model finished naturally" };
         case "length":
-            return "length";
+            return {
+                reason: "length",
+                message: "Model hit max tokens (try increasing maxTokens)",
+            };
+        case "content_filter":
+            return {
+                reason: "safety",
+                message: "Content filtered by safety system",
+            };
         case "tool_calls":
-            return "toolUse";
+            return {
+                reason: "tool_calls",
+                message: "Model requested tool calls",
+            };
+        case "function_call":
+            return {
+                reason: "tool_calls",
+                message: "Model requested function call",
+            };
         default:
-            return "stop";
+            return null;
     }
 }
 
 // =============================================================================
-// Status API
+// Provider handler
 // =============================================================================
 
 interface ErrorRateEntry {
-    key: number;
-    key_as_string: string;
-    value: number;
+    model: string;
+    errors: number;
+    requests: number;
 }
 
-type ErrorRatesResponse = Record<string, ErrorRateEntry[]>;
+type ErrorRatesResponse = ErrorRateEntry[];
 
-async function fetchErrorRates(): Promise<ErrorRatesResponse> {
-    const response = await fetch(
-        "https://featherless.ai/api/feather/status/error-rates",
-    );
-    if (!response.ok) {
-        throw new Error(`Status API returned ${response.status}`);
-    }
-    return response.json() as Promise<ErrorRatesResponse>;
-}
-
-function classifyHealth(recentErrorRate: number): string {
-    if (recentErrorRate === 0) return "Healthy";
-    if (recentErrorRate < 0.05) return "Mostly OK";
-    if (recentErrorRate < 0.2) return "Degraded";
-    if (recentErrorRate < 0.5) return "Impaired";
-    return "Severely impaired";
-}
-
-// =============================================================================
-// Extension entry point
-// =============================================================================
-
-export default function (pi: ExtensionAPI) {
-    pi.registerProvider("featherless", {
-        baseUrl: "https://api.featherless.ai/v1",
-        apiKey: "FEATHERLESS_API_KEY",
-        api: "featherless-openai",
-        models: FEATHERLESS_MODELS,
-        streamSimple: streamFeatherless,
-        oauth: {
-            name: "Featherless",
-            async login(callbacks) {
-                const key = await callbacks.onPrompt({
-                    message: "Enter your Featherless API key:",
-                    placeholder: "rc_...",
-                });
-                return {
-                    access: key,
-                    refresh: key,
-                    expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
-                };
-            },
-            async refreshToken(credentials) {
-                return credentials;
-            },
-            getApiKey(credentials) {
-                return credentials.access;
-            },
+async function fetchErrorRates(apiKey: string): Promise<ErrorRatesResponse> {
+    const response = await fetch("https://featherless.ai/api/error-rates", {
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
         },
     });
+    return response.json();
+}
 
-    pi.registerCommand("featherless-status", {
-        description: "Show Featherless model status and concurrency costs",
-        handler: async (_args, ctx) => {
-            try {
-                const errorRates = await fetchErrorRates();
+function classifyHealth(
+    errorRate: number,
+): "healthy" | "degraded" | "unhealthy" {
+    if (errorRate < 0.01) return "healthy";
+    if (errorRate < 0.05) return "degraded";
+    return "unhealthy";
+}
 
-                // Group models by model class
-                const classBuckets = new Map<
-                    string,
-                    {
-                        models: typeof FEATHERLESS_MODELS;
-                        concurrencyCost: number;
-                    }
-                >();
-                for (const model of FEATHERLESS_MODELS) {
-                    const meta = MODEL_META[model.id];
-                    if (!meta) continue;
-                    const existing = classBuckets.get(meta.modelClass);
-                    if (existing) {
-                        existing.models.push(model);
-                    } else {
-                        classBuckets.set(meta.modelClass, {
-                            models: [model],
-                            concurrencyCost: meta.concurrencyCost,
-                        });
-                    }
-                }
+export default async function handler(api: ExtensionAPI) {
+    const baseUrl =
+        api.getFlag("featherlessBaseUrl") || "https://api.featherless.ai/v1";
+    const apiKey = api.getFlag("featherlessApiKey");
 
-                const lines: string[] = [];
+    if (!apiKey) {
+        api.auth.registerOAuth({
+            name: "featherless",
+            key: {
+                message: "Connect to Featherless AI",
+                placeholder: "Paste your Featherless API key",
+            },
+            access: {
+                url: "https://featherless.ai/api/auth/token",
+                method: "POST",
+                body: { grant_type: "api_key", api_key: "{{input}}" },
+                map: (data: any) => ({
+                    apiKey: data.access_token,
+                    expires: Date.now() + data.expires_in * 1000,
+                }),
+            },
+            refresh: {
+                url: "https://featherless.ai/api/auth/refresh",
+                method: "POST",
+                body: { refresh_token: "{{refreshToken}}" },
+                map: (data: any) => ({
+                    apiKey: data.access_token,
+                    expires: Date.now() + data.expires_in * 1000,
+                }),
+            },
+        });
+    }
 
-                for (const [modelClass, bucket] of classBuckets) {
-                    const entries = errorRates[modelClass];
-                    const names = bucket.models.map((m) => m.name).join(", ");
-                    const cc = bucket.concurrencyCost;
+    const errorRates = await fetchErrorRates(apiKey).catch(() => []);
+    const classBuckets: Record<string, number> = {
+        healthy: 0,
+        degraded: 0,
+        unhealthy: 0,
+    };
+    if (Array.isArray(errorRates)) {
+        for (const entry of errorRates) {
+            const health = classifyHealth(entry.errors / entry.requests);
+            classBuckets[health]++;
+        }
+    }
 
-                    if (!entries || entries.length === 0) {
-                        lines.push(
-                            `[cc:${cc}] ${modelClass} -- No data -- ${names}`,
-                        );
-                        continue;
-                    }
+    const meta: Record<
+        string,
+        { family: string; modelClass: string; concurrencyCost: number }
+    > = {};
+    for (const [id, data] of Object.entries(MODEL_META)) {
+        meta[id] = data;
+    }
 
-                    const recent = entries.slice(-6);
-                    const avgRecent =
-                        recent.reduce((sum, e) => sum + e.value, 0) /
-                        recent.length;
-                    const health = classifyHealth(avgRecent);
+    const existing = api.models.getProviderModels("featherless");
+    const models: ProviderModelConfig[] = [];
 
-                    const last24 = entries.slice(-24);
-                    const avg24h =
-                        last24.reduce((sum, e) => sum + e.value, 0) /
-                        last24.length;
+    for (const config of FEATHERLESS_MODELS) {
+        const existingConfig = existing.find((m) => m.id === config.id);
+        if (existingConfig) {
+            models.push(existingConfig);
+        } else {
+            models.push({
+                ...config,
+                api: "openai-completions",
+                provider: "featherless",
+                baseUrl,
+                credentials: { apiKey },
+                streamSimple,
+                metadata: meta[config.id],
+            });
+        }
+    }
 
-                    const pctRecent = (avgRecent * 100).toFixed(1);
-                    const pct24h = (avg24h * 100).toFixed(1);
+    // Sort by concurrency cost (cheapest first)
+    models.sort((a, b) => {
+        const aCost = meta[a.id]?.concurrencyCost || 1;
+        const bCost = meta[b.id]?.concurrencyCost || 1;
+        return aCost - bCost;
+    });
 
-                    lines.push(
-                        `[cc:${cc}] ${modelClass} ${health} - ${pctRecent}% err (6h), ${pct24h}% (24h) -- ${names}`,
-                    );
-                }
+    // Add concurrency limits based on model size
+    const lines: string[] = [];
+    const entries: Array<{
+        model: string;
+        cost: number;
+        recent: number[];
+        last24: number[];
+    }> = [];
 
-                lines.push("");
-                lines.push(
-                    "cc = concurrency cost (Basic: 2 max, Premium: 4 max, Scale: 8 max)",
-                );
+    for (const model of models) {
+        const cc = meta[model.id]?.concurrencyCost || 1;
+        entries.push({
+            model: model.id,
+            cost: cc,
+            recent: new Array(5).fill(0),
+            last24: new Array(24).fill(0),
+        });
+    }
 
-                // Show other impaired classes
-                const allImpaired: string[] = [];
-                for (const [modelClass, entries] of Object.entries(
-                    errorRates,
-                )) {
-                    if (classBuckets.has(modelClass)) continue;
-                    if (!entries || entries.length === 0) continue;
-                    const recent = entries.slice(-6);
-                    const avg =
-                        recent.reduce((sum, e) => sum + e.value, 0) /
-                        recent.length;
-                    if (avg >= 0.2) {
-                        allImpaired.push(
-                            `${modelClass}: ${(avg * 100).toFixed(1)}% err (6h)`,
-                        );
-                    }
-                }
+    const recent = entries.map(
+        (e) => e.recent.reduce((a, b) => a + b, 0) / e.recent.length,
+    );
+    const avgRecent = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const health = classifyHealth(avgRecent);
 
-                if (allImpaired.length > 0) {
-                    lines.push("");
-                    lines.push("Other impaired classes:");
-                    lines.push(...allImpaired);
-                }
+    const last24 = entries.map(
+        (e) => e.last24.reduce((a, b) => a + b, 0) / e.last24.length,
+    );
+    const avg24h = last24.reduce((a, b) => a + b, 0) / last24.length;
+    const pctRecent =
+        (recent.filter((r) => r > 0.1).length / recent.length) * 100;
+    const pct24h = (last24.filter((r) => r > 0.1).length / last24.length) * 100;
 
-                await ctx.ui.select("Featherless Status", lines);
-            } catch (error) {
-                ctx.ui.notify(
-                    `Failed to fetch status: ${error instanceof Error ? error.message : error}`,
-                    "error",
-                );
-            }
-        },
+    const allImpaired =
+        health !== "healthy" || avg24h > 0.05 || pctRecent > 10 || pct24h > 5;
+
+    api.models.registerProvider({
+        id: "featherless",
+        name: "Featherless AI",
+        description: allImpaired
+            ? "Featherless AI (degraded performance)"
+            : "Featherless AI - Fast, reliable, and cost-effective inference",
+        models,
+        concurrencyCost: 1,
     });
 }

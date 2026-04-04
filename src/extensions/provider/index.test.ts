@@ -43,38 +43,14 @@ describe("parseToolCallTags", () => {
         expect(result.textBefore).toContain("bad json");
     });
 
-    // -- Unclosed <tool_call> (QRWKV format) --
+    // -- Qwen3-only: Unclosed <tool_call> treated as text --
 
-    it("parses <tool_call> without closing tag (QRWKV)", () => {
+    it("treats unclosed <tool_call> as regular text (Qwen3-only)", () => {
         const text = `<tool_call>\n{"name": "Bash", "arguments": {"command": "ls"}}`;
         const result = parseToolCallTags(text);
-        expect(result.toolCalls).toHaveLength(1);
-        expect(result.toolCalls[0].name).toBe("Bash");
-        expect(result.toolCalls[0].arguments).toEqual({ command: "ls" });
-    });
-
-    // -- <function-call> format (RWKV6Qwen2.5) --
-
-    it("parses <function-call> XML format", () => {
-        const text = `<function-call>\n<name>bash</name>\n<arguments>\n{"command": "ls"}\n</arguments>\n</function-call>`;
-        const result = parseToolCallTags(text);
-        expect(result.toolCalls).toHaveLength(1);
-        expect(result.toolCalls[0].name).toBe("bash");
-        expect(result.toolCalls[0].arguments).toEqual({ command: "ls" });
-    });
-
-    it("parses <function-call> with </functioncall> typo closing", () => {
-        const text = `<function-call>\n<name>bash</name>\n<arguments>\n{"command": "ls"}\n</arguments>\n</functioncall>`;
-        const result = parseToolCallTags(text);
-        expect(result.toolCalls).toHaveLength(1);
-        expect(result.toolCalls[0].name).toBe("bash");
-    });
-
-    it("parses <function-call> with JSON body", () => {
-        const text = `<function-call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</function-call>`;
-        const result = parseToolCallTags(text);
-        expect(result.toolCalls).toHaveLength(1);
-        expect(result.toolCalls[0].name).toBe("bash");
+        // Qwen3 format requires proper closing tags
+        expect(result.toolCalls).toHaveLength(0);
+        expect(result.textBefore).toContain("<tool_call>");
     });
 });
 
@@ -83,24 +59,27 @@ describe("Featherless provider registration", () => {
         const registerProvider = vi.fn();
         const registerCommand = vi.fn();
         const mockPi = {
-            registerProvider,
+            models: {
+                getProviderModels: vi.fn(() => []),
+                registerProvider,
+            },
+            auth: {
+                registerOAuth: vi.fn(),
+            },
             registerCommand,
             on: vi.fn(),
             registerFlag: vi.fn(),
-            getFlag: vi.fn(),
+            getFlag: vi.fn(() => "test-api-key"),
         } as any;
 
         const { default: init } = await import("./index.js");
-        init(mockPi);
+        await init(mockPi);
 
         expect(registerProvider).toHaveBeenCalledOnce();
-        const [name, config] = registerProvider.mock.calls[0];
-        expect(name).toBe("featherless");
-        expect(config.baseUrl).toBe("https://api.featherless.ai/v1");
-        expect(config.apiKey).toBe("FEATHERLESS_API_KEY");
-        expect(config.api).toBe("featherless-openai");
+        const [config] = registerProvider.mock.calls[0];
+        expect(config.id).toBe("featherless");
+        expect(config.name).toBe("Featherless AI");
         expect(config.models).toHaveLength(FEATHERLESS_MODELS.length);
-        expect(typeof config.streamSimple).toBe("function");
-        expect(config.oauth).toBeDefined();
+        expect(typeof config.models[0].streamSimple).toBe("function");
     });
 });
