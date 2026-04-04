@@ -344,6 +344,13 @@ function streamFeatherless(
         params.tools = convertTools(context.tools);
       }
 
+      // Qwen3 thinking toggle via vLLM chat_template_kwargs
+      if (model.id.includes("Qwen3")) {
+        (params as any).chat_template_kwargs = {
+          enable_thinking: !!options?.reasoning,
+        };
+      }
+
       const openaiStream = await client.chat.completions.create(params, {
         signal: options?.signal,
       });
