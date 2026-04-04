@@ -15,7 +15,7 @@ const featherlessCompat: OpenAICompletionsCompat = {
   supportsStore: false,
   supportsDeveloperRole: false,
   supportsReasoningEffort: false,
-  supportsUsageInStreaming: true,
+  supportsUsageInStreaming: false,
   maxTokensField: "max_tokens",
   requiresToolResultName: false,
   requiresAssistantAfterToolResult: false,

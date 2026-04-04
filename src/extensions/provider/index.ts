@@ -330,7 +330,6 @@ function streamFeatherless(
           model: model.id,
           messages: convertMessages(context),
           stream: true,
-          stream_options: { include_usage: true },
         };
 
       if (options?.maxTokens) {
@@ -343,11 +342,6 @@ function streamFeatherless(
 
       if (context.tools && context.tools.length > 0) {
         params.tools = convertTools(context.tools);
-      }
-
-      // Qwen3 thinking mode
-      if (model.reasoning && options?.reasoning) {
-        (params as any).enable_thinking = true;
       }
 
       const openaiStream = await client.chat.completions.create(params, {
@@ -718,8 +712,18 @@ function streamFeatherless(
       stream.end();
     } catch (error) {
       output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-      output.errorMessage =
-        error instanceof Error ? error.message : String(error);
+      // Extract detailed error info from OpenAI API errors
+      let errorMsg = error instanceof Error ? error.message : String(error);
+      if (error && typeof error === "object" && "status" in error) {
+        const apiErr = error as {
+          status: number;
+          error?: { message?: string; type?: string };
+        };
+        if (apiErr.error?.message) {
+          errorMsg = `${apiErr.status}: ${apiErr.error.message}`;
+        }
+      }
+      output.errorMessage = errorMsg;
       stream.push({ type: "error", reason: output.stopReason, error: output });
       stream.end();
     }
