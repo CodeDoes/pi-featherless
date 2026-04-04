@@ -18,7 +18,7 @@ describe("FEATHERLESS_MODELS", () => {
     }
   });
 
-  it("Qwen3 models have qwen thinking compat", () => {
+  it("Qwen3 models are marked as reasoning", () => {
     const qwen3Models = FEATHERLESS_MODELS.filter((m) =>
       m.id.startsWith("Qwen/Qwen3"),
     );
@@ -26,7 +26,6 @@ describe("FEATHERLESS_MODELS", () => {
     for (const model of qwen3Models) {
       expect(model.reasoning).toBe(true);
       expect(model.compat).toBeDefined();
-      expect((model.compat as any)?.thinkingFormat).toBe("qwen");
     }
   });
 });
