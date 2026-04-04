@@ -351,6 +351,11 @@ function streamFeatherless(
         };
       }
 
+      // Estimate input tokens from message content (chars/4 heuristic)
+      const estimatedInputTokens = Math.ceil(
+        JSON.stringify(params.messages).length / 4,
+      );
+
       const openaiStream = await client.chat.completions.create(params, {
         signal: options?.signal,
       });
@@ -363,6 +368,7 @@ function streamFeatherless(
       let thinkingIndex = -1;
       let textIndex = -1;
       let toolCallCount = 0;
+      let outputTokenCount = 0;
 
       // Native tool_calls accumulator (OpenAI streaming format)
       // Each entry accumulates incremental name/arguments deltas
@@ -546,6 +552,8 @@ function streamFeatherless(
           output.usage.totalTokens = output.usage.input + output.usage.output;
           calculateCost(model, output.usage);
         }
+        // Count streamed output tokens
+        outputTokenCount++;
 
         const choice = chunk.choices?.[0];
         if (!choice) continue;
@@ -706,6 +714,14 @@ function streamFeatherless(
         });
       }
       closeText();
+
+      // Featherless doesn't return usage for streaming requests.
+      // Estimate so pi can trigger auto-compaction.
+      if (output.usage.totalTokens === 0) {
+        output.usage.input = estimatedInputTokens;
+        output.usage.output = outputTokenCount;
+        output.usage.totalTokens = estimatedInputTokens + outputTokenCount;
+      }
 
       if (options?.signal?.aborted) {
         throw new Error("Request was aborted");
