@@ -25,15 +25,14 @@ interface SwarmAgent {
     task: string;
     status: "pending" | "running" | "completed" | "failed";
     output: string;
-    lastEvent?: string; // Latest captured event (tool call, thinking, etc)
+    lastEvent?: string; 
+    startTime: number;
+    duration?: number;
     process?: ChildProcess;
 }
 
 const activeSwarm = new Map<string, SwarmAgent>();
 
-/**
- * Update the Swarm UI widget with a high-signal "Beehive" view
- */
 function updateSwarmWidget(ctx: ExtensionContext) {
     const theme = ctx.ui.theme;
     const lines: string[] = [
@@ -43,16 +42,15 @@ function updateSwarmWidget(ctx: ExtensionContext) {
     if (activeSwarm.size === 0) {
         lines.push(theme.fg("muted", "  Waiting for instructions..."));
     } else {
+        const now = Date.now();
         for (const agent of activeSwarm.values()) {
             let statusIcon = "";
             let statusColor: any = "muted";
             
             switch (agent.status) {
                 case "running":
-                    // Activity pulse animation based on current event
-                    const isTool = agent.lastEvent?.startsWith("Using");
-                    statusIcon = isTool ? "⚙️" : "🧠";
-                    statusColor = isTool ? "yellow" : "cyan";
+                    statusIcon = "⏳";
+                    statusColor = "accent";
                     break;
                 case "completed":
                     statusIcon = "✅";
@@ -64,22 +62,17 @@ function updateSwarmWidget(ctx: ExtensionContext) {
                     break;
             }
 
+            const elapsed = agent.duration || (now - agent.startTime);
+            const timerStr = theme.fg("dim", `[${(elapsed / 1000).toFixed(1)}s]`);
             const idStr = theme.fg("accent", `[${agent.id}]`);
             const eventStr = agent.lastEvent ? theme.fg(statusColor, ` ${agent.lastEvent}`) : theme.fg("muted", " Initializing...");
-            const taskStr = theme.fg("dim", ` (${agent.task.slice(0, 40)}...)`);
-            
-            lines.push(` ${statusIcon} ${idStr}${eventStr}${taskStr}`);
+            lines.push(` ${statusIcon} ${idStr} ${timerStr}${eventStr}`);
         }
     }
-    
     lines.push(theme.fg("muted", " ─────────────────────────────────────────────────────────────"));
-    
     ctx.ui.setWidget("featherless-swarm", lines, { placement: "aboveEditor" });
 }
 
-/**
- * Run a subagent process
- */
 async function runSubagent(
     ctx: ExtensionContext, 
     id: string, 
@@ -88,23 +81,12 @@ async function runSubagent(
     systemPrompt?: string,
     signal?: AbortSignal
 ): Promise<string> {
-    const agent: SwarmAgent = { id, model, task, status: "running", output: "" };
+    const agent: SwarmAgent = { id, model, task, status: "running", output: "", startTime: Date.now() };
     activeSwarm.set(id, agent);
-    updateSwarmWidget(ctx);
-
+    
     return new Promise((resolve, reject) => {
-        // Spawn pi in JSON mode for structured output
-        const args = [
-            "--model", model,
-            "--mode", "json",
-            "-p",
-            "--no-session"
-        ];
-
-        if (systemPrompt) {
-            args.push("--system-prompt", systemPrompt);
-        }
-
+        const args = ["--model", model, "--mode", "json", "-p", "--no-session"];
+        if (systemPrompt) args.push("--system-prompt", systemPrompt);
         args.push(task);
 
         const child = spawn("pi", args, {
@@ -113,18 +95,6 @@ async function runSubagent(
         });
 
         agent.process = child;
-
-        // Handle ESC / Abort signal
-        const onAbort = () => {
-            if (!child.killed) {
-                child.kill("SIGINT");
-                agent.status = "failed";
-                agent.lastEvent = "Interrupted (ESC)";
-                updateSwarmWidget(ctx);
-            }
-        };
-        signal?.addEventListener("abort", onAbort);
-
         let stdoutBuffer = "";
         let stdoutAccumulated = "";
 
@@ -133,7 +103,6 @@ async function runSubagent(
             stdoutAccumulated += chunk;
             stdoutBuffer += chunk;
             
-            // Parse streaming JSON lines to update live status
             const lines = stdoutBuffer.split("\n");
             stdoutBuffer = lines.pop() || "";
             
@@ -141,62 +110,50 @@ async function runSubagent(
                 if (!line.trim()) continue;
                 try {
                     const event = JSON.parse(line);
-                    
-                    // Capture high-signal events for the UI
                     if (event.type === "message_update" && event.message.role === "assistant") {
-                        // Capture streaming thinking and text
                         const content = event.message.content || [];
                         const lastBlock = content[content.length - 1];
                         if (lastBlock?.type === "thinking") {
-                            const thought = lastBlock.thinking || "";
-                            agent.lastEvent = thought.length > 25 ? thought.slice(-22) + "..." : thought;
+                            agent.lastEvent = lastBlock.thinking.slice(-30);
                         } else if (lastBlock?.type === "text") {
-                            const text = lastBlock.text || "";
-                            agent.lastEvent = text.length > 25 ? text.slice(-22) + "..." : text;
+                            agent.lastEvent = lastBlock.text.slice(-30);
                         }
-                    } else if (event.type === "message_start") {
-                        agent.lastEvent = "Thinking...";
                     } else if (event.type === "tool_execution_start") {
                         agent.lastEvent = `Using ${event.toolName}`;
-                    } else if (event.type === "tool_execution_end") {
-                        agent.lastEvent = `Finished ${event.toolName}`;
-                    } else if (event.type === "message_end" && event.message.role === "assistant") {
-                        agent.lastEvent = "Responding...";
                     }
-                    
                     updateSwarmWidget(ctx);
-                } catch (e) {
-                    // Ignore partial/invalid JSON
-                }
+                } catch (e) {}
             }
         });
 
         child.on("close", (code) => {
             agent.status = code === 0 ? "completed" : "failed";
-            // Capture all previous output before closing
-            agent.lastEvent = code === 0 ? "Done" : `Failed (${code})`;
+            agent.duration = Date.now() - agent.startTime;
             updateSwarmWidget(ctx);
             
-            // Re-parse the final output to ensure we didn't miss anything from the last buffer chunk
-            const finalLines = (stdoutBuffer + stdoutAccumulated).split("\n").filter(l => l.trim());
-            let finalContent = "";
-            
             if (code === 0) {
-                try {
-                    for (const line of finalLines) {
-                        try {
-                            const event = JSON.parse(line);
-                            if (event.type === "message_end" && event.message.role === "assistant") {
-                                finalContent = event.message.content.map((c: any) => c.text || "").join("");
-                            }
-                        } catch(e) {}
-                    }
-                    resolve(finalContent || stdoutAccumulated);
-                } catch (e) {
-                    resolve(stdoutAccumulated); // Fallback to raw output
+                const finalLines = (stdoutAccumulated).split("\n").filter(l => l.trim());
+                let finalContent = "";
+                for (const line of finalLines) {
+                    try {
+                        const event = JSON.parse(line);
+                        if (event.type === "message_end" && event.message.role === "assistant") {
+                            finalContent = event.message.content.map((c: any) => c.text || "").join("");
+                        }
+                    } catch(e) {}
                 }
+                resolve(finalContent || stdoutAccumulated);
             } else {
                 reject(new Error(`Agent ${id} failed with code ${code}`));
+            }
+        });
+
+        signal?.addEventListener("abort", () => {
+            if (!child.killed) {
+                child.kill("SIGINT");
+                agent.status = "failed";
+                agent.lastEvent = "Interrupted";
+                updateSwarmWidget(ctx);
             }
         });
     });
@@ -206,66 +163,62 @@ export function registerSwarmTools(pi: ExtensionAPI) {
     pi.registerTool({
         name: "swarm_scan",
         label: "Swarm Scan",
-        description: "Spawn parallel subagents to scan multiple files and return relevant info.",
+        description: "Analyze multiple files in parallel using subagents.",
         parameters: {
             type: "object",
             properties: {
-                files: { type: "array", items: { type: "string" }, description: "List of file paths to scan." },
-                query: { type: "string", description: "What to look for in these files." }
+                files: { type: "array", items: { type: "string" } },
+                query: { type: "string" }
             },
             required: ["files", "query"]
         },
         async execute(toolCallId, params: any, signal, onUpdate, ctx) {
             const { files, query } = params;
+            const uiInterval = setInterval(() => updateSwarmWidget(ctx), 500);
             
-            ctx.ui.notify(`Launching swarm to analyze ${files.length} files...`, "info");
-            
-            // Run in parallel with concurrency limit (respecting Featherless plan)
-            const results = await Promise.all(files.map((file: string, index: number) => {
-                const id = `scan-${index}`;
-                const task = `ARCHITECT'S QUERY: "${query}"
-Analyze file: ${file}
-Report back on the file's purpose and contents as they relate to the architect's query.`;
-                return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT, signal);
-            }));
+            try {
+                const results = await Promise.all(files.map((file: string, index: number) => {
+                    const id = `scan-${index}`;
+                    const task = `ARCHITECT'S QUERY: "${query}"\nAnalyze file: ${file}`;
+                    return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT, signal);
+                }));
 
-            // Clear swarm after completion
-            activeSwarm.clear();
-            updateSwarmWidget(ctx);
+                // Format each subagent's report as a distinct block for the architect's context
+                const formattedReports = results.map((report, index) => {
+                    return `### SUBAGENT REPORT [${index}] - ${files[index]}\n${report}`;
+                }).join("\n\n---\n\n");
 
-            return {
-                content: [{ type: "text", text: results.join("\n\n---\n\n") }],
-                details: { files_scanned: files.length }
-            };
+                return { 
+                    content: [{ type: "text", text: formattedReports }],
+                    details: { files_scanned: files.length, subagent_ids: results.map((_, i) => `scan-${i}`) }
+                };
+            } finally {
+                clearInterval(uiInterval);
+                activeSwarm.clear();
+                updateSwarmWidget(ctx);
+            }
         }
     });
 
     pi.registerTool({
         name: "swarm_write",
         label: "Swarm Write",
-        description: "Delegate a file write/edit operation to a high-speed subagent.",
+        description: "Delegate file edits to a subagent.",
         parameters: {
             type: "object",
             properties: {
-                path: { type: "string", description: "File path to modify." },
-                plan: { type: "string", description: "Detailed instruction on what to change." }
+                path: { type: "string" },
+                plan: { type: "string" }
             },
             required: ["path", "plan"]
         },
         async execute(toolCallId, params: any, signal, onUpdate, ctx) {
             const { path, plan } = params;
-            const id = "writer";
-            const task = `Modify file ${path} according to this plan: ${plan}. Verify your changes by reading the file back.`;
-            
-            const result = await runSubagent(ctx, id, WRITER_MODEL, task, undefined, signal);
-            
+            const task = `Edit ${path}: ${plan}`;
+            const result = await runSubagent(ctx, "writer", WRITER_MODEL, task, undefined, signal);
             activeSwarm.clear();
             updateSwarmWidget(ctx);
-
-            return {
-                content: [{ type: "text", text: result }],
-                details: { file_modified: path }
-            };
+            return { content: [{ type: "text", text: result }] };
         }
     });
 }

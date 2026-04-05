@@ -1,0 +1,19 @@
+[Featherless] Request req_1 started (cost: 4, total: 4/4)
+[Featherless] Request req_1 completed (remaining: 0/4)
+[Featherless] Token usage: 1632 input, 92 output
+[Featherless] Request req_2 started (cost: 4, total: 4/4)
+[Featherless] Request req_2 completed (remaining: 0/4)
+[Featherless] Token usage: 1735 input, 115 output
+[Featherless] Request req_3 started (cost: 4, total: 4/4)
+[Featherless] Request req_3 completed (remaining: 0/4)
+[Featherless] Token usage: 1810 input, 58 output
+[Featherless] Request req_4 started (cost: 4, total: 4/4)
+[Featherless] Request req_4 completed (remaining: 0/4)
+[Featherless] Token usage: 1869 input, 178 output
+This is file B with some logic: if (x) return y;
+
+**Summary:**
+- **fileA.txt**: Contains test data with a secret value `12345`
+- **fileB.txt**: Contains a snippet of logic/conditionals
+
+The `swarm_scan` spawned two parallel subagents (`scan-0` and `scan-1`) to analyze both files simultaneously. You should have seen the timers for each subagent running in parallel in the TUI!

@@ -1,0 +1,1 @@
+This is file A with some secret data: 12345

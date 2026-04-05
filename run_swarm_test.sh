@@ -1,0 +1,1 @@
+pi -e /home/kit/dev/llm/pi-featherless-2/index.ts --model featherless-ai/zai-org/GLM-5 "Use the swarm_scan tool to read fileA.txt, fileB.txt, and fileC.txt. I want to know what the content of each file is. Use parallel scanning."
