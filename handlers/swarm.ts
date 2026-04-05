@@ -1,119 +1,72 @@
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { dirname } from "path";
 import { Type } from "@sinclair/typebox";
 import type { Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { defineTool } from "@mariozechner/pi-coding-agent";
-import type { Component, TUI } from "@mariozechner/pi-tui";
+import { SwarmPanel, semaphore } from "./swarm-panel";
 import { PROVIDER, getApiKey } from "./shared";
 
-// ─── colours ──────────────────────────────────────────────────────────────────
+const CONCURRENCY = 4;
+const MAX_FILE_CHARS = 24_000;
 
-const R          = "\x1b[0m";
-const WHITE_FG   = "\x1b[97m";
-const BOT_BG     = ["\x1b[48;5;23m", "\x1b[48;5;130m", "\x1b[48;5;53m", "\x1b[48;5;22m"];
-const EMPTY_BG   = "\x1b[48;5;236m";
-const OVERALL_FILL_BG  = "\x1b[48;5;18m";
-const OVERALL_EMPTY_BG = "\x1b[48;5;234m";
+// ─── shared helpers ───────────────────────────────────────────────────────────
 
-function bgBar(
-    plainText: string,
-    width: number,
-    pct: number,
-    fillBg: string,
-    emptyBg: string,
-): string {
-    const padded  = plainText.padEnd(width).slice(0, width);
-    const filledW = Math.round((pct / 100) * width);
-    return `${fillBg}${WHITE_FG}${padded.slice(0, filledW)}${R}${emptyBg}${WHITE_FG}${padded.slice(filledW)}${R}`;
+function shortLabel(path: string) {
+    return path.split("/").pop() ?? path;
 }
 
-// ─── SwarmPanel component ─────────────────────────────────────────────────────
-
-interface BotState {
-    label: string;
-    progress: number;   // 0–100
-    snippet: string;    // partial response shown inline
-    status: "idle" | "working" | "done" | "error";
+function setWidget(ctx: any, panel: SwarmPanel) {
+    if (!ctx.hasUI) return;
+    ctx.ui.setWidget("swarm", (tui: any, _theme: any) => {
+        panel.attach(tui);
+        return panel;
+    }, { placement: "aboveEditor" });
 }
 
-class SwarmPanel implements Component {
-    bots: BotState[];
-    doneCount = 0;
-    private _requestRender: (() => void) | null = null;
-
-    constructor(labels: string[]) {
-        this.bots = labels.map(label => ({
-            label, progress: 0, snippet: "", status: "idle" as const,
-        }));
-    }
-
-    /** Called once the TUI instance is available. */
-    attach(tui: TUI) {
-        this._requestRender = tui.requestRender.bind(tui);
-    }
-
-    requestRender() {
-        this._requestRender?.();
-    }
-
-    render(w: number): string[] {
-        const lines: string[] = [];
-
-        // overall bar
-        const overallPct = this.bots.length === 0 ? 0
-            : Math.round((this.doneCount / this.bots.length) * 100);
-        const overallLabel = `  ◈ swarm  ${this.doneCount}/${this.bots.length}  ${overallPct}%`;
-        lines.push(bgBar(overallLabel, w, overallPct, OVERALL_FILL_BG, OVERALL_EMPTY_BG));
-        lines.push("");
-
-        // one line per bot (up to 8; clamp for very large swarms)
-        const visible = this.bots.slice(0, 8);
-        for (let i = 0; i < visible.length; i++) {
-            const b = visible[i];
-            const colorIdx = i % BOT_BG.length;
-            const pctStr  = b.status !== "idle" ? `  ${String(b.progress).padStart(3)}%` : "";
-            const tag     = b.status === "error" ? " ✗" : b.status === "done" ? " ✓" : "";
-            const label   = `  ${b.label}${tag}`;
-            const snip    = b.snippet ? `  ${b.snippet}` : (b.status === "idle" ? "  waiting" : "");
-            const rightW  = pctStr.length;
-            const leftMax = w - rightW;
-            let left = label + snip;
-            if (left.length > leftMax) left = left.slice(0, leftMax);
-            const plain = left.padEnd(leftMax) + pctStr;
-            lines.push(bgBar(plain, w, b.progress, BOT_BG[colorIdx], EMPTY_BG));
-        }
-
-        if (this.bots.length > 8) {
-            const rest = `  … and ${this.bots.length - 8} more`;
-            lines.push(EMPTY_BG + WHITE_FG + rest.padEnd(w).slice(0, w) + R);
-        }
-
-        return lines;
-    }
-
-    invalidate() {}
+function clearWidget(ctx: any) {
+    if (ctx.hasUI) ctx.ui.setWidget("swarm", undefined);
 }
 
-// ─── semaphore ────────────────────────────────────────────────────────────────
-
-function semaphore(limit: number) {
-    let running = 0;
-    const queue: (() => void)[] = [];
-    return async function run<T>(fn: () => Promise<T>): Promise<T> {
-        if (running >= limit) await new Promise<void>(res => queue.push(res));
-        running++;
-        try { return await fn(); }
-        finally {
-            running--;
-            queue.shift()?.();
-        }
-    };
+function stripCodeFence(text: string): string {
+    // Remove ```lang … ``` wrapper that the LLM sometimes adds
+    return text.replace(/^```[^\n]*\n([\s\S]*?)```\s*$/m, "$1").trim();
 }
 
-// ─── tool registration ────────────────────────────────────────────────────────
+async function llmCall(
+    model: Model<any>,
+    apiKey: string,
+    prompt: string,
+    signal: AbortSignal | undefined,
+    maxTokens = 2048,
+): Promise<string> {
+    const response = await completeSimple(
+        model,
+        {
+            messages: [{
+                role: "user",
+                content: [{ type: "text", text: prompt }],
+                timestamp: Date.now(),
+            }],
+        },
+        { apiKey, maxTokens, signal },
+    );
+    return response.content
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join("");
+}
 
-export function registerSwarm(pi: ExtensionAPI) {
+function tickProgress(b: { progress: number }, panel: SwarmPanel): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+        if (b.progress < 90) { b.progress += 5; panel.requestRender(); }
+    }, 200);
+}
+
+// ─── swarm (read / analyse) ───────────────────────────────────────────────────
+
+function registerSwarmRead(pi: ExtensionAPI) {
     pi.registerTool(defineTool({
         name: "swarm",
         description:
@@ -133,131 +86,261 @@ export function registerSwarm(pi: ExtensionAPI) {
         execute: async (toolCallId, params, signal, onUpdate, ctx) => {
             const model = ctx.model as Model<any> | undefined;
             const apiKey = await getApiKey(ctx);
-
             const { question, files } = params;
             const results: string[] = new Array(files.length).fill("");
 
-            // Create panel and widget
-            const labels = files.map(f => f.split("/").pop() ?? f);
-            const panel = new SwarmPanel(labels);
-
-            if (ctx.hasUI) {
-                ctx.ui.setWidget("swarm", (tui, _theme) => {
-                    panel.attach(tui);
-                    return panel;
-                }, { placement: "aboveEditor" });
-            }
-
-            const run = semaphore(4);
+            const panel = new SwarmPanel(files.map(shortLabel));
+            setWidget(ctx, panel);
+            const run = semaphore(CONCURRENCY);
 
             await Promise.all(files.map((filePath, i) =>
                 run(async () => {
                     const b = panel.bots[i];
-                    b.status = "working";
-                    b.progress = 5;
-                    panel.requestRender();
+                    b.status = "working"; b.progress = 5; panel.requestRender();
 
-                    // Read file
                     let fileContent: string;
-                    try {
-                        fileContent = readFileSync(filePath, "utf8");
-                    } catch {
-                        b.status = "error";
-                        b.snippet = "file not found";
-                        b.progress = 100;
-                        panel.doneCount++;
-                        panel.requestRender();
+                    try { fileContent = readFileSync(filePath, "utf8"); }
+                    catch {
+                        b.status = "error"; b.snippet = "file not found";
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
                         results[i] = `[error: could not read ${filePath}]`;
                         return;
                     }
 
-                    b.progress = 20;
-                    panel.requestRender();
-
-                    // Build prompt
-                    const prompt = `File: ${filePath}\n\n\`\`\`\n${fileContent.slice(0, 24000)}\n\`\`\`\n\n${question}`;
+                    b.progress = 20; panel.requestRender();
 
                     if (!model || !apiKey) {
-                        // No LLM available — return file content as-is
-                        b.status = "done";
-                        b.progress = 100;
-                        b.snippet = "(no model)";
-                        panel.doneCount++;
-                        panel.requestRender();
+                        b.status = "done"; b.progress = 100; b.snippet = "(no model)";
+                        panel.doneCount++; panel.requestRender();
                         results[i] = fileContent;
                         return;
                     }
 
                     try {
-                        // Tick progress while waiting
-                        const ticker = setInterval(() => {
-                            if (b.progress < 90) {
-                                b.progress += 5;
-                                panel.requestRender();
-                            }
-                        }, 200);
-
-                        const response = await completeSimple(
-                            model,
-                            {
-                                messages: [{
-                                    role: "user",
-                                    content: [{ type: "text", text: prompt }],
-                                    timestamp: Date.now(),
-                                }],
-                            },
-                            { apiKey, maxTokens: 1024, signal },
-                        );
-
+                        const prompt = `File: ${filePath}\n\n\`\`\`\n${fileContent.slice(0, MAX_FILE_CHARS)}\n\`\`\`\n\n${question}`;
+                        const ticker = tickProgress(b, panel);
+                        const text = await llmCall(model, apiKey, prompt, signal);
                         clearInterval(ticker);
-
-                        const text = response.content
-                            .filter((c: any) => c.type === "text")
-                            .map((c: any) => c.text)
-                            .join("");
 
                         results[i] = text;
                         b.snippet = text.slice(0, 50).replace(/\n/g, " ");
-                        b.status = "done";
-                        b.progress = 100;
-                        panel.doneCount++;
-                        panel.requestRender();
+                        b.status = "done"; b.progress = 100;
+                        panel.doneCount++; panel.requestRender();
 
-                        // Stream partial results back so the LLM can see progress
                         onUpdate?.({
-                            content: [{
-                                type: "text",
-                                text: results
-                                    .map((r, j) => r ? `### ${files[j]}\n${r}` : "")
-                                    .filter(Boolean)
-                                    .join("\n\n"),
-                            }],
+                            content: [{ type: "text", text: results.map((r, j) => r ? `### ${files[j]}\n${r}` : "").filter(Boolean).join("\n\n") }],
                             details: { partial: true, completed: panel.doneCount, total: files.length },
                         });
                     } catch (err: any) {
-                        b.status = "error";
-                        b.snippet = String(err?.message ?? err).slice(0, 40);
-                        b.progress = 100;
-                        panel.doneCount++;
-                        panel.requestRender();
+                        b.status = "error"; b.snippet = String(err?.message ?? err).slice(0, 40);
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
                         results[i] = `[error: ${err?.message ?? err}]`;
                     }
                 })
             ));
 
-            // Remove widget
-            if (ctx.hasUI) {
-                ctx.ui.setWidget("swarm", undefined);
-            }
-
-            const formatted = files
-                .map((f, i) => `### ${f}\n${results[i]}`)
-                .join("\n\n---\n\n");
+            clearWidget(ctx);
 
             return {
-                content: [{ type: "text", text: formatted }],
+                content: [{ type: "text", text: files.map((f, i) => `### ${f}\n${results[i]}`).join("\n\n---\n\n") }],
                 details: { files, results },
             };
         },
     }));
+}
+
+// ─── swarm_write ──────────────────────────────────────────────────────────────
+
+function registerSwarmWrite(pi: ExtensionAPI) {
+    pi.registerTool(defineTool({
+        name: "swarm_write",
+        description:
+            "Generate and write multiple files in parallel using concurrent LLM workers. " +
+            "Use this when you need to create or overwrite several files at once based on a spec or prompt for each. " +
+            "Each worker generates the complete content for one file and writes it to disk.",
+        params: Type.Object({
+            context: Type.Optional(Type.String({
+                description: "Optional shared context injected into every worker's prompt (e.g. project description, style guide).",
+            })),
+            tasks: Type.Array(Type.Object({
+                file: Type.String({ description: "File path to create or overwrite." }),
+                prompt: Type.String({ description: "Instructions describing what to write in this file." }),
+            }), { minItems: 1 }),
+        }),
+        execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+            const model = ctx.model as Model<any> | undefined;
+            const apiKey = await getApiKey(ctx);
+            const { tasks, context } = params;
+            const written: string[] = [];
+            const errors: string[] = [];
+
+            const panel = new SwarmPanel(tasks.map(t => shortLabel(t.file)));
+            setWidget(ctx, panel);
+            const run = semaphore(CONCURRENCY);
+
+            await Promise.all(tasks.map((task, i) =>
+                run(async () => {
+                    const b = panel.bots[i];
+                    b.status = "working"; b.progress = 5; panel.requestRender();
+
+                    if (!model || !apiKey) {
+                        b.status = "error"; b.snippet = "no model";
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
+                        errors.push(task.file);
+                        return;
+                    }
+
+                    try {
+                        const contextBlock = context ? `Context:\n${context}\n\n` : "";
+                        const prompt =
+                            `${contextBlock}Write the complete content for the file \`${task.file}\`.\n\n` +
+                            `${task.prompt}\n\n` +
+                            `Return ONLY the raw file content with no explanation, no markdown fences.`;
+
+                        const ticker = tickProgress(b, panel);
+                        const raw = await llmCall(model, apiKey, prompt, signal, 4096);
+                        clearInterval(ticker);
+
+                        const content = stripCodeFence(raw);
+                        mkdirSync(dirname(task.file), { recursive: true });
+                        writeFileSync(task.file, content, "utf8");
+
+                        written.push(task.file);
+                        b.snippet = `${content.split("\n").length} lines`;
+                        b.status = "done"; b.progress = 100;
+                        panel.doneCount++; panel.requestRender();
+
+                        onUpdate?.({
+                            content: [{ type: "text", text: `Written: ${written.join(", ")}` }],
+                            details: { partial: true, written, errors },
+                        });
+                    } catch (err: any) {
+                        b.status = "error"; b.snippet = String(err?.message ?? err).slice(0, 40);
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
+                        errors.push(task.file);
+                    }
+                })
+            ));
+
+            clearWidget(ctx);
+
+            const summary = [
+                written.length ? `Written (${written.length}): ${written.join(", ")}` : "",
+                errors.length  ? `Failed  (${errors.length}): ${errors.join(", ")}` : "",
+            ].filter(Boolean).join("\n");
+
+            return {
+                content: [{ type: "text", text: summary }],
+                details: { written, errors },
+            };
+        },
+    }));
+}
+
+// ─── swarm_edit ───────────────────────────────────────────────────────────────
+
+function registerSwarmEdit(pi: ExtensionAPI) {
+    pi.registerTool(defineTool({
+        name: "swarm_edit",
+        description:
+            "Apply an edit instruction to multiple files in parallel using concurrent LLM workers. " +
+            "Use this when you need to make the same kind of change across many files at once " +
+            "(e.g. add error handling, rename a symbol, apply a refactor). " +
+            "Each worker reads a file, applies the instruction, and writes the result back.",
+        params: Type.Object({
+            context: Type.Optional(Type.String({
+                description: "Optional shared context for all workers (e.g. project conventions, reason for the change).",
+            })),
+            tasks: Type.Array(Type.Object({
+                file: Type.String({ description: "File path to edit." }),
+                instruction: Type.String({ description: "What change to make to this file." }),
+            }), { minItems: 1 }),
+        }),
+        execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+            const model = ctx.model as Model<any> | undefined;
+            const apiKey = await getApiKey(ctx);
+            const { tasks, context } = params;
+            const edited: string[] = [];
+            const errors: string[] = [];
+
+            const panel = new SwarmPanel(tasks.map(t => shortLabel(t.file)));
+            setWidget(ctx, panel);
+            const run = semaphore(CONCURRENCY);
+
+            await Promise.all(tasks.map((task, i) =>
+                run(async () => {
+                    const b = panel.bots[i];
+                    b.status = "working"; b.progress = 5; panel.requestRender();
+
+                    let original: string;
+                    try { original = readFileSync(task.file, "utf8"); }
+                    catch {
+                        b.status = "error"; b.snippet = "file not found";
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
+                        errors.push(task.file);
+                        return;
+                    }
+
+                    b.progress = 15; panel.requestRender();
+
+                    if (!model || !apiKey) {
+                        b.status = "error"; b.snippet = "no model";
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
+                        errors.push(task.file);
+                        return;
+                    }
+
+                    try {
+                        const contextBlock = context ? `Context:\n${context}\n\n` : "";
+                        const prompt =
+                            `${contextBlock}File: ${task.file}\n\n` +
+                            `\`\`\`\n${original.slice(0, MAX_FILE_CHARS)}\n\`\`\`\n\n` +
+                            `Instruction: ${task.instruction}\n\n` +
+                            `Return ONLY the complete modified file content with no explanation, no markdown fences.`;
+
+                        const ticker = tickProgress(b, panel);
+                        const raw = await llmCall(model, apiKey, prompt, signal, 4096);
+                        clearInterval(ticker);
+
+                        const content = stripCodeFence(raw);
+                        writeFileSync(task.file, content, "utf8");
+
+                        edited.push(task.file);
+                        b.snippet = `${Math.abs(content.split("\n").length - original.split("\n").length)} line delta`;
+                        b.status = "done"; b.progress = 100;
+                        panel.doneCount++; panel.requestRender();
+
+                        onUpdate?.({
+                            content: [{ type: "text", text: `Edited: ${edited.join(", ")}` }],
+                            details: { partial: true, edited, errors },
+                        });
+                    } catch (err: any) {
+                        b.status = "error"; b.snippet = String(err?.message ?? err).slice(0, 40);
+                        b.progress = 100; panel.doneCount++; panel.requestRender();
+                        errors.push(task.file);
+                    }
+                })
+            ));
+
+            clearWidget(ctx);
+
+            const summary = [
+                edited.length ? `Edited (${edited.length}): ${edited.join(", ")}` : "",
+                errors.length ? `Failed (${errors.length}): ${errors.join(", ")}` : "",
+            ].filter(Boolean).join("\n");
+
+            return {
+                content: [{ type: "text", text: summary }],
+                details: { edited, errors },
+            };
+        },
+    }));
+}
+
+// ─── export ───────────────────────────────────────────────────────────────────
+
+export function registerSwarm(pi: ExtensionAPI) {
+    registerSwarmRead(pi);
+    registerSwarmWrite(pi);
+    registerSwarmEdit(pi);
 }
