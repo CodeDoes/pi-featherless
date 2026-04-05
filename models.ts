@@ -14,14 +14,18 @@ interface ModelClass {
 const MODEL_CLASSES: Record<string, ModelClass> = {
     "glm4-9b": { context_limit: 32768, concurrency_use: 1 },
     "glm4-32b": { context_limit: 32768, concurrency_use: 2 },
-    "glm46-357b": { context_limit: 32768, concurrency_use: 4 },
     "glm47-flash": { context_limit: 32768, concurrency_use: 2 },
     "glm47-357b": { context_limit: 32768, concurrency_use: 4 },
     "glm5-754b": { context_limit: 32768, concurrency_use: 4 },
-    "minimax-m2": { context_limit: 32768, concurrency_use: 4 },
-    "minimax-m21": { context_limit: 32768, concurrency_use: 4 },
     "minimax-m25": { context_limit: 32768, concurrency_use: 4 },
-    "qrwkv-72b-32k": { context_limit: 32768, concurrency_use: 1 },
+    "kimi-k2": { context_limit: 32768, concurrency_use: 4 },
+    "kimi-k25": { context_limit: 32768, concurrency_use: 4 },
+    "deepseek-v3.2": { context_limit: 32768, concurrency_use: 4 },
+    "deepseek31-685b": { context_limit: 32768, concurrency_use: 4 },
+    "mistral-24b-2503": { context_limit: 32768, concurrency_use: 2 },
+    "qwen3-32b": { context_limit: 32768, concurrency_use: 2 },
+    "qwen3-235b": { context_limit: 32768, concurrency_use: 4 },
+    "qwen3-coder-480b": { context_limit: 32768, concurrency_use: 4 },
 };
 
 export interface ModelEntry {
@@ -35,17 +39,29 @@ export interface ModelEntry {
  * The models we actually expose. Add/remove here.
  */
 export const MODELS: ModelEntry[] = [
-    // GLM — 5/5 bench, native tool_calls
+    // GLM
     { id: "zai-org/GLM-4.7-Flash", model_class: "glm47-flash", tool_use: true },
     { id: "zai-org/GLM-4.7", model_class: "glm47-357b", tool_use: true },
     { id: "zai-org/GLM-5", model_class: "glm5-754b", tool_use: true },
 
-    // MiniMax — 5/5 bench, native tool_calls
+    // MiniMax
     { id: "MiniMaxAI/MiniMax-M2.5", model_class: "minimax-m25", tool_use: true },
 
-    // QRWKV — cc:1, needs fine-tune for reliable tool calling
-    { id: "featherless-ai/QRWKV-72B", model_class: "qrwkv-72b-32k" },
+    // Kimi — officially supported for tool calling
+    { id: "moonshotai/Kimi-K2-Instruct", model_class: "kimi-k2", tool_use: true },
+    { id: "moonshotai/Kimi-K2.5", model_class: "kimi-k25", tool_use: true },
 
+    // DeepSeek
+    { id: "deepseek-ai/DeepSeek-V3.2", model_class: "deepseek-v3.2", tool_use: true },
+    { id: "deepseek-ai/DeepSeek-V3.1", model_class: "deepseek31-685b", tool_use: true },
+
+    // Mistral
+    { id: "mistralai/Mistral-Small-3.2-24B-Instruct-2506", model_class: "mistral-24b-2503", tool_use: true },
+
+    // Qwen3 — officially supported for tool calling
+    { id: "Qwen/Qwen3-32B", model_class: "qwen3-32b", reasoning: true, tool_use: true },
+    { id: "Qwen/Qwen3-235B-A22B", model_class: "qwen3-235b", reasoning: true, tool_use: true },
+    { id: "Qwen/Qwen3-Coder-480B-A35B-Instruct", model_class: "qwen3-coder-480b", reasoning: true, tool_use: true },
 ];
 
 export function getModelConfig(entry: ModelEntry) {

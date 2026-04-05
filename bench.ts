@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 /**
  * Tool use bench for Featherless models.
- * One model at a time. Full output. Scoreboard at the end.
+ * Tracks pass rate, tokens generated, and time per scenario.
  *
  * Usage:
  *   npx tsx bench.ts              # run all
@@ -39,21 +39,31 @@ function getFlag(name: string, fallback: number): number {
     const i = process.argv.indexOf(`--${name}`);
     return i !== -1 ? Number(process.argv[i + 1]) : fallback;
 }
-const BATCH_SIZE = getFlag("batch", 4);
-const BATCH_DELAY = getFlag("delay", 5);
+const BATCH_SIZE = getFlag("batch", 1);
+const BATCH_DELAY = getFlag("delay", 16);  // 4 switches/min limit
 
 // ── ANSI ───────────────────────────────────────────────────────────────────
 
-const COLORS = [
-    "\x1b[36m", "\x1b[33m", "\x1b[35m", "\x1b[32m", "\x1b[34m", "\x1b[91m",
-    "\x1b[93m", "\x1b[95m", "\x1b[96m", "\x1b[92m", "\x1b[94m", "\x1b[31m",
-];
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
+const GREEN = "\x1b[32m";
+const RED = "\x1b[31m";
+const YELLOW = "\x1b[33m";
+const CYAN = "\x1b[36m";
 const BG_GREEN = "\x1b[42m\x1b[30m";
 const BG_RED = "\x1b[41m\x1b[37m";
 const BG_YELLOW = "\x1b[43m\x1b[30m";
+
+// Family markers — distinct unicode symbols for quick visual scanning
+const FAMILY_MARKER: Record<string, string> = {
+    glm: "\u25c6",       // ◆
+    minimax: "\u25cf",    // ●
+    kimi: "\u25b2",       // ▲
+    deepseek: "\u25a0",   // ■
+    mistral: "\u2666",    // ♦
+    qwen3: "\u2605",      // ★
+};
 
 // ── Bench models ───────────────────────────────────────────────────────────
 
@@ -63,55 +73,30 @@ interface BenchModel {
     cc: number;
     thinking: boolean;
     family: string;
-    tagBased?: boolean;
 }
 
-// Few-shot priming for RWKV / state-space models.
-// Full think → tool → result → talk loops to prime the recurrent state.
-// These are "vague memories" of past interactions.
-const TAG_FEW_SHOT: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: "You are a helpful assistant. You have access to tools: bash, read_file, write_file. To use a tool, wrap your call in [tool_call] tags. Think briefly before acting." },
-
-    // Memory 1: simple command
-    { role: "user", content: "Can you check who I'm logged in as?" },
-    { role: "assistant", content: "Let me check that for you.\n\n[tool_call]\n{\"name\": \"bash\", \"arguments\": {\"command\": \"whoami\"}}\n[/tool_call]" },
-    { role: "user", content: "[tool result: kit]" },
-    { role: "assistant", content: "You're logged in as `kit`." },
-
-    // Memory 2: read a file
-    { role: "user", content: "What's in /etc/hostname?" },
-    { role: "assistant", content: "I'll read that file.\n\n[tool_call]\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"/etc/hostname\"}}\n[/tool_call]" },
-    { role: "user", content: "[tool result: dev-machine]" },
-    { role: "assistant", content: "Your hostname is `dev-machine`." },
-
-    // Memory 3: write a file with tricky content
-    { role: "user", content: "Save {\"name\": \"test\", \"value\": 42} to data.json" },
-    { role: "assistant", content: "Sure, I'll write that.\n\n[tool_call]\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"data.json\", \"content\": \"{\\\"name\\\": \\\"test\\\", \\\"value\\\": 42}\"}}\n[/tool_call]" },
-    { role: "user", content: "[tool result: ok]" },
-    { role: "assistant", content: "Done, `data.json` has been written." },
-
-    // Memory 4: piped command
-    { role: "user", content: "How many files are in /var/log?" },
-    { role: "assistant", content: "Let me count them.\n\n[tool_call]\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls /var/log | wc -l\"}}\n[/tool_call]" },
-    { role: "user", content: "[tool result: 23]" },
-    { role: "assistant", content: "There are 23 files in `/var/log`." },
-
-    // Memory 5: no tool needed
-    { role: "user", content: "What's the capital of France?" },
-    { role: "assistant", content: "Paris." },
-];
-
 const BENCH_MODELS: BenchModel[] = [
-    // QRWKV
-    { id: "featherless-ai/QRWKV-72B", short: "QRWKV 72B", cc: 1, thinking: false, family: "qrwkv", tagBased: true },
     // GLM
+    { id: "zai-org/GLM-Z1-9B-0414", short: "GLM-Z1 9B", cc: 1, thinking: true, family: "glm" },
     { id: "zai-org/GLM-Z1-32B-0414", short: "GLM-Z1 32B", cc: 2, thinking: true, family: "glm" },
     { id: "zai-org/GLM-4.7-Flash", short: "GLM-4.7 Flash", cc: 2, thinking: false, family: "glm" },
-    { id: "zai-org/GLM-4.7", short: "GLM-4.7", cc: 4, thinking: false, family: "glm" },
-    { id: "zai-org/GLM-5", short: "GLM-5", cc: 4, thinking: false, family: "glm" },
+    { id: "zai-org/GLM-4.7", short: "GLM-4.7 357B", cc: 4, thinking: false, family: "glm" },
+    { id: "zai-org/GLM-5", short: "GLM-5 754B", cc: 4, thinking: false, family: "glm" },
     // MiniMax
     { id: "MiniMaxAI/MiniMax-M2.5", short: "MiniMax M2.5", cc: 4, thinking: false, family: "minimax" },
     { id: "MiniMaxAI/MiniMax-M2.1", short: "MiniMax M2.1", cc: 4, thinking: false, family: "minimax" },
+    // Kimi — officially supported for tool calling
+    { id: "moonshotai/Kimi-K2-Instruct", short: "Kimi K2", cc: 4, thinking: false, family: "kimi" },
+    { id: "moonshotai/Kimi-K2.5", short: "Kimi K2.5", cc: 4, thinking: false, family: "kimi" },
+    // DeepSeek
+    { id: "deepseek-ai/DeepSeek-V3.2", short: "DS V3.2", cc: 4, thinking: false, family: "deepseek" },
+    { id: "deepseek-ai/DeepSeek-V3.1", short: "DS V3.1", cc: 4, thinking: false, family: "deepseek" },
+    // Mistral
+    { id: "mistralai/Mistral-Small-3.2-24B-Instruct-2506", short: "Mistral 3.2 24B", cc: 2, thinking: false, family: "mistral" },
+    // Qwen3 — officially supported for tool calling
+    { id: "Qwen/Qwen3-32B", short: "Qwen3 32B", cc: 2, thinking: true, family: "qwen3" },
+    { id: "Qwen/Qwen3-235B-A22B", short: "Qwen3 235B", cc: 4, thinking: true, family: "qwen3" },
+    { id: "Qwen/Qwen3-Coder-480B-A35B-Instruct", short: "Qwen3 Coder 480B", cc: 4, thinking: true, family: "qwen3" },
 ];
 
 // ── Tools ──────────────────────────────────────────────────────────────────
@@ -227,54 +212,7 @@ const scenarios: Scenario[] = [
     },
 ];
 
-// ── Simple tag parser (fallback for models that emit <tool_call> in text) ──
-
-function parseToolCallTags(content: string): {
-    toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>;
-    textBefore: string;
-} {
-    const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
-    const tagPatterns = [
-        // closed tags — angle brackets
-        /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g,
-        /<function-call>\s*([\s\S]*?)\s*<\/function-call>/g,
-        // closed tags — square brackets (survives chat templates)
-        /\[tool_call\]\s*([\s\S]*?)\s*\[\/tool_call\]/g,
-        /\[function-call\]\s*([\s\S]*?)\s*\[\/function-call\]/g,
-        // unclosed tags (either style)
-        /<tool_call>\s*([\s\S]*)/g,
-        /\[tool_call\]\s*([\s\S]*)/g,
-    ];
-    let textBefore = content;
-    for (const re of tagPatterns) {
-        let match;
-        while ((match = re.exec(content)) !== null) {
-            try {
-                let raw = match[1].trim();
-                // Try to repair truncated JSON (e.g. missing closing braces)
-                let parsed;
-                try {
-                    parsed = JSON.parse(raw);
-                } catch {
-                    // Count unmatched braces and close them
-                    let depth = 0;
-                    for (const ch of raw) {
-                        if (ch === '{') depth++;
-                        else if (ch === '}') depth--;
-                    }
-                    if (depth > 0) raw += '}'.repeat(depth);
-                    parsed = JSON.parse(raw);
-                }
-                toolCalls.push({
-                    name: parsed.name,
-                    arguments: parsed.arguments ?? parsed.parameters ?? {},
-                });
-                textBefore = textBefore.replace(match[0], "");
-            } catch {}
-        }
-    }
-    return { toolCalls, textBefore: textBefore.trim() };
-}
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 // ── Runner ─────────────────────────────────────────────────────────────────
 
@@ -285,41 +223,69 @@ interface Result {
     pass: boolean;
     error: string | null;
     timeMs: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
     family: string;
 }
 
-async function runOne(model: BenchModel, color: string, scenario: Scenario): Promise<Result> {
+async function runOne(model: BenchModel, scenario: Scenario): Promise<Result> {
     const w = process.stdout.write.bind(process.stdout);
+    const marker = FAMILY_MARKER[model.family] ?? "\u25cb";
 
-    w(`\n  ${color}${BOLD}${model.short}${RESET} ${DIM}cc:${model.cc} ${model.family}${RESET}  ${BOLD}${scenario.name}${RESET}\n`);
+    w(`\n  ${CYAN}${marker}${RESET} ${BOLD}${model.short}${RESET} ${DIM}cc:${model.cc}${RESET}  ${BOLD}${scenario.name}${RESET}\n`);
     w(`  ${DIM}prompt: ${scenario.prompt}${RESET}\n`);
-    w(`  ${color}`);
+    w(`  ${DIM}`);
 
     const start = Date.now();
 
     try {
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = model.tagBased
-            ? [...TAG_FEW_SHOT, { role: "user", content: scenario.prompt }]
-            : [{ role: "system", content: "You are a helpful assistant with tool access. Be concise." }, { role: "user", content: scenario.prompt }];
         const params: any = {
             model: model.id,
-            messages,
+            messages: [
+                { role: "system", content: "You are a helpful assistant with tool access. Be concise." },
+                { role: "user", content: scenario.prompt },
+            ],
+            tools: scenario.tools,
             max_tokens: 512,
             stream: true,
             stream_options: { include_usage: true },
         };
-        // Tag-based models get tool format via system prompt, not OpenAI tools param
-        if (!model.tagBased) params.tools = scenario.tools;
         if (model.thinking) params.enable_thinking = true;
 
-        const stream = await client.chat.completions.create(params);
+        // Retry on 429 with backoff
+        let stream: any;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                stream = await client.chat.completions.create(params);
+                break;
+            } catch (e: any) {
+                if (e.status === 429 && attempt < 2) {
+                    const wait = 20 * (attempt + 1);
+                    w(`${YELLOW}429, waiting ${wait}s...${RESET} `);
+                    await sleep(wait * 1000);
+                    continue;
+                }
+                throw e;
+            }
+        }
 
         let content = "";
         let inThinking = false;
         const nativeTC = new Map<number, { name: string; args: string }>();
         let gotNative = false;
+        let promptTokens = 0;
+        let completionTokens = 0;
+        let totalTokens = 0;
 
         for await (const chunk of stream) {
+            // Capture usage from the final chunk
+            if (chunk.usage) {
+                promptTokens = chunk.usage.prompt_tokens ?? 0;
+                completionTokens = chunk.usage.completion_tokens ?? 0;
+                totalTokens = chunk.usage.total_tokens ?? 0;
+            }
+
             const choice = chunk.choices?.[0];
             if (!choice?.delta) continue;
 
@@ -331,19 +297,19 @@ async function runOne(model: BenchModel, color: string, scenario: Scenario): Pro
             }
 
             if (choice.delta.content) {
-                if (inThinking) { w(`${RESET}\n  ${color}`); inThinking = false; }
+                if (inThinking) { w(`${RESET}\n  ${DIM}`); inThinking = false; }
                 content += choice.delta.content;
                 w(choice.delta.content);
             }
 
             if (choice.delta.tool_calls) {
-                if (inThinking) { w(`${RESET}\n  ${color}`); inThinking = false; }
+                if (inThinking) { w(`${RESET}\n  ${DIM}`); inThinking = false; }
                 gotNative = true;
                 for (const tc of choice.delta.tool_calls) {
                     const idx = tc.index ?? 0;
                     let entry = nativeTC.get(idx);
                     if (!entry) { entry = { name: "", args: "" }; nativeTC.set(idx, entry); }
-                    if (tc.function?.name) { entry.name += tc.function.name; w(`${BOLD}${tc.function.name}${RESET}${color}`); }
+                    if (tc.function?.name) { entry.name += tc.function.name; w(`${CYAN}${tc.function.name}${RESET}${DIM}`); }
                     if (tc.function?.arguments) { entry.args += tc.function.arguments; w(tc.function.arguments); }
                 }
             }
@@ -352,7 +318,7 @@ async function runOne(model: BenchModel, color: string, scenario: Scenario): Pro
         w(`${RESET}\n`);
         const elapsed = Date.now() - start;
 
-        // Parse tool calls: native first, then tag fallback
+        // Parse tool calls
         let toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
         let plainText = content;
         if (gotNative && nativeTC.size > 0) {
@@ -363,10 +329,6 @@ async function runOne(model: BenchModel, color: string, scenario: Scenario): Pro
                     toolCalls.push({ name: entry.name, arguments: {} });
                 }
             }
-        } else {
-            const parsed = parseToolCallTags(content);
-            toolCalls = parsed.toolCalls;
-            plainText = parsed.textBefore;
         }
 
         const err = scenario.validate(toolCalls, plainText);
@@ -376,22 +338,21 @@ async function runOne(model: BenchModel, color: string, scenario: Scenario): Pro
         const tcInfo = toolCalls.length > 0
             ? `${DIM}tools: ${toolCalls.map((t) => `${t.name}(${JSON.stringify(t.arguments)})`).join(", ")}${RESET}`
             : "";
+        const tokInfo = `${DIM}${completionTokens}tok${RESET}`;
 
-        w(`  ${verdict} ${DIM}${(elapsed / 1000).toFixed(1)}s${RESET} ${tcInfo}\n`);
+        w(`  ${verdict} ${DIM}${(elapsed / 1000).toFixed(1)}s${RESET} ${tokInfo} ${tcInfo}\n`);
 
-        return { modelId: model.id, modelShort: model.short, scenario: scenario.name, pass: err === null, error: err, timeMs: elapsed, family: model.family };
+        return { modelId: model.id, modelShort: model.short, scenario: scenario.name, pass: err === null, error: err, timeMs: elapsed, promptTokens, completionTokens, totalTokens, family: model.family };
     } catch (e: any) {
         w(`${RESET}\n`);
         const elapsed = Date.now() - start;
         const msg = e.message?.slice(0, 80) ?? String(e);
         w(`  ${BG_RED} ERR ${RESET} ${DIM}${msg} | ${(elapsed / 1000).toFixed(1)}s${RESET}\n`);
-        return { modelId: model.id, modelShort: model.short, scenario: scenario.name, pass: false, error: msg, timeMs: elapsed, family: model.family };
+        return { modelId: model.id, modelShort: model.short, scenario: scenario.name, pass: false, error: msg, timeMs: elapsed, promptTokens: 0, completionTokens: 0, totalTokens: 0, family: model.family };
     }
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
-
-function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 async function main() {
     const positional: string[] = [];
@@ -427,9 +388,8 @@ async function main() {
         console.log(`\n${BOLD}  ═══ BATCH ${b + 1}/${totalBatches} ═══${RESET} ${DIM}[${batch.map((m) => m.short).join(", ")}]${RESET}`);
 
         for (const model of batch) {
-            const color = COLORS[models.indexOf(model) % COLORS.length];
             for (const scenario of scenarios) {
-                const r = await runOne(model, color, scenario);
+                const r = await runOne(model, scenario);
                 allResults.push(r);
             }
         }
@@ -437,11 +397,11 @@ async function main() {
 
     // ── Scoreboard ─────────────────────────────────────────────────────
 
-    console.log(`\n\n${BOLD}  ═══════════════════════════════════════${RESET}`);
+    console.log(`\n\n${BOLD}  ═══════════════════════════════════════════════════════════════${RESET}`);
     console.log(`${BOLD}  SCOREBOARD${RESET}`);
-    console.log(`  ═══════════════════════════════════════\n`);
-    console.log(`  ${"Model".padEnd(25)} ${"Family".padEnd(10)} Pass  ${"Rate".padEnd(14)} Avg    CC`);
-    console.log(`  ${"─".repeat(78)}`);
+    console.log(`  ═══════════════════════════════════════════════════════════════\n`);
+    console.log(`  ${"Model".padEnd(22)} ${"Family".padEnd(10)} Pass  ${"Rate".padEnd(14)} Avg     Tok/run  Total   CC`);
+    console.log(`  ${"─".repeat(95)}`);
 
     const byModel = new Map<string, Result[]>();
     for (const r of allResults) {
@@ -451,20 +411,25 @@ async function main() {
     }
 
     const scores: Array<{
-        short: string; family: string; color: string;
-        pass: number; total: number; rate: number; avgMs: number; cc: number;
+        short: string; family: string; marker: string;
+        pass: number; total: number; rate: number; avgMs: number;
+        avgCompletionTok: number; totalCompletionTok: number;
+        totalPromptTok: number; cc: number;
     }> = [];
 
-    let mi = 0;
     for (const [modelId, results] of byModel) {
         const pass = results.filter((r) => r.pass).length;
         const total = results.length;
         const m = BENCH_MODELS.find((x) => x.id === modelId)!;
+        const totalCompletionTok = results.reduce((s, r) => s + r.completionTokens, 0);
+        const totalPromptTok = results.reduce((s, r) => s + r.promptTokens, 0);
         scores.push({
             short: results[0].modelShort, family: results[0].family,
-            color: COLORS[mi++ % COLORS.length],
+            marker: FAMILY_MARKER[results[0].family] ?? "\u25cb",
             pass, total, rate: pass / total,
             avgMs: results.reduce((s, r) => s + r.timeMs, 0) / total,
+            avgCompletionTok: totalCompletionTok / total,
+            totalCompletionTok, totalPromptTok,
             cc: m.cc,
         });
     }
@@ -472,11 +437,27 @@ async function main() {
     scores.sort((a, b) => b.rate - a.rate || a.avgMs - b.avgMs);
 
     for (const s of scores) {
-        const bar = s.color + "\u2588".repeat(Math.round(s.rate * 10)) + RESET + DIM + "\u2591".repeat(10 - Math.round(s.rate * 10)) + RESET;
-        const name = `${s.color}${s.short}${RESET}`;
-        const pad = 25 - s.short.length;
-        console.log(`  ${name}${" ".repeat(Math.max(1, pad))} ${DIM}${s.family.padEnd(10)}${RESET} ${s.pass}/${s.total}   ${bar} ${(s.rate * 100).toFixed(0).padStart(3)}%  ${(s.avgMs / 1000).toFixed(1).padStart(5)}s  ${DIM}${s.cc}${RESET}`);
+        const rateColor = s.rate === 1 ? GREEN : s.rate >= 0.6 ? YELLOW : RED;
+        const bar = rateColor + "\u2588".repeat(Math.round(s.rate * 10)) + RESET + DIM + "\u2591".repeat(10 - Math.round(s.rate * 10)) + RESET;
+        const name = `${CYAN}${s.marker}${RESET} ${s.short}`;
+        const pad = 22 - s.short.length - 2;
+        console.log(
+            `  ${name}${" ".repeat(Math.max(1, pad))} ${DIM}${s.family.padEnd(10)}${RESET} ` +
+            `${s.pass}/${s.total}   ${bar} ${(s.rate * 100).toFixed(0).padStart(3)}%  ` +
+            `${(s.avgMs / 1000).toFixed(1).padStart(5)}s  ` +
+            `${String(Math.round(s.avgCompletionTok)).padStart(5)}  ` +
+            `${String(s.totalCompletionTok).padStart(6)}  ` +
+            `${DIM}${s.cc}${RESET}`
+        );
     }
+
+    // ── Totals ─────────────────────────────────────────────────────────
+
+    const grandTotalCompletion = allResults.reduce((s, r) => s + r.completionTokens, 0);
+    const grandTotalPrompt = allResults.reduce((s, r) => s + r.promptTokens, 0);
+    const grandTotalTime = allResults.reduce((s, r) => s + r.timeMs, 0);
+    console.log(`\n  ${DIM}Total tokens: ${grandTotalPrompt} prompt + ${grandTotalCompletion} completion = ${grandTotalPrompt + grandTotalCompletion}${RESET}`);
+    console.log(`  ${DIM}Total time: ${(grandTotalTime / 1000).toFixed(1)}s${RESET}`);
 
     // ── By scenario ────────────────────────────────────────────────────
 
@@ -503,8 +484,9 @@ async function main() {
         return rb - ra;
     })) {
         const pass = results.filter((r) => r.pass).length;
+        const tok = results.reduce((s, r) => s + r.completionTokens, 0);
         const pct = ((pass / results.length) * 100).toFixed(0);
-        console.log(`  ${family.padEnd(12)} ${pass}/${results.length} (${pct}%)`);
+        console.log(`  ${family.padEnd(12)} ${pass}/${results.length} (${pct}%)  ${DIM}${tok} completion tokens${RESET}`);
     }
 
     const totalPass = allResults.filter((r) => r.pass).length;
