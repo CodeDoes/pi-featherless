@@ -9,6 +9,7 @@
 interface ModelClass {
     context_limit: number;
     concurrency_use: number;
+    chars_per_token?: number;  // Default 3.2 (chars/4 overestimates; real average is ~3.2)
 }
 
 const MODEL_CLASSES: Record<string, ModelClass> = {
@@ -23,7 +24,7 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
     "deepseek-v3.2": { context_limit: 32768, concurrency_use: 4 },
     "deepseek31-685b": { context_limit: 32768, concurrency_use: 4 },
     "mistral-24b-2503": { context_limit: 32768, concurrency_use: 2 },
-    "qwen3-32b": { context_limit: 32768, concurrency_use: 2 },
+    "qwen3-32b": { context_limit: 32768, concurrency_use: 2, chars_per_token: 3.12 },  // Measured from tokenize API
     "qwen3-235b": { context_limit: 32768, concurrency_use: 4 },
     "qwen3-coder-480b": { context_limit: 32768, concurrency_use: 4 },
 };
@@ -64,16 +65,69 @@ export const MODELS: ModelEntry[] = [
     { id: "Qwen/Qwen3-Coder-480B-A35B-Instruct", model_class: "qwen3-coder-480b", reasoning: true, tool_use: true },
 ];
 
+/**
+ * Safety factor for context window.
+ * 
+ * Pi's chars/4 heuristic underestimates tokens by ~27% on average.
+ * To prevent silent overflow, we reduce the reported context window.
+ * 
+ * With SAFETY_FACTOR = 0.75:
+ * - Real 32k context -> reported 24k
+ * - When pi thinks it's at 24k, it's actually at ~32k
+ * - Compaction triggers before real overflow
+ */
+const SAFETY_FACTOR = 0.75;
+
 export function getModelConfig(entry: ModelEntry) {
     const mc = MODEL_CLASSES[entry.model_class];
     if (!mc) throw new Error(`Unknown model_class: ${entry.model_class}`);
+    
+    // Apply safety factor to prevent overflow from chars/4 underestimation
+    const safeContextWindow = Math.floor(mc.context_limit * SAFETY_FACTOR);
+    
     return {
         id: entry.id,
         name: entry.id,
         reasoning: entry.reasoning ?? false,
-        contextWindow: mc.context_limit,
-        maxTokens: mc.context_limit,
+        contextWindow: safeContextWindow,
+        maxTokens: mc.context_limit,  // Keep real limit for output
         input: ["text"] as ("text" | "image")[],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     };
+}
+
+/**
+ * Get the real context limit for a model (before safety factor).
+ */
+export function getRealContextLimit(modelId: string): number | undefined {
+    const entry = MODELS.find(m => m.id === modelId);
+    if (!entry) return undefined;
+    const mc = MODEL_CLASSES[entry.model_class];
+    return mc?.context_limit;
+}
+
+/**
+ * Get the chars_per_token ratio for a model class.
+ * Falls back to 3.2 (measured average) if not specified.
+ */
+export function getCharsPerToken(modelClass: string): number {
+    const mc = MODEL_CLASSES[modelClass];
+    return mc?.chars_per_token ?? 3.2;
+}
+
+/**
+ * Get the concurrency cost for a model class.
+ * Falls back to 1 if not specified.
+ */
+export function getConcurrencyUse(modelClass: string): number {
+    const mc = MODEL_CLASSES[modelClass];
+    return mc?.concurrency_use ?? 1;
+}
+
+/**
+ * Get the model class for a model ID.
+ */
+export function getModelClass(modelId: string): string | undefined {
+    const entry = MODELS.find(m => m.id === modelId);
+    return entry?.model_class;
 }

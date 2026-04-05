@@ -1,0 +1,63 @@
+[Featherless] Request req_1 started (cost: 4, total: 4/4)
+[Featherless] Request req_1 completed (remaining: 0/4)
+[Featherless] Token usage: 1432 input, 87 output
+[Featherless] Request req_2 started (cost: 4, total: 4/4)
+[Featherless] Request req_2 completed (remaining: 0/4)
+[Featherless] Token usage: 1541 input, 361 output
+[Featherless] Request req_3 started (cost: 4, total: 4/4)
+[Featherless] Request req_3 completed (remaining: 0/4)
+[Featherless] Token usage: 3705 input, 147 output
+[Featherless] Request req_4 started (cost: 4, total: 4/4)
+[Featherless] Request req_4 completed (remaining: 0/4)
+[Featherless] Token usage: 7007 input, 235 output
+[Featherless] Request req_5 started (cost: 4, total: 4/4)
+[Featherless] Request req_5 completed (remaining: 0/4)
+[Featherless] Token usage: 7467 input, 33 output
+[Featherless] Request req_6 started (cost: 4, total: 4/4)
+[Featherless] Request req_6 completed (remaining: 0/4)
+[Featherless] Token usage: 7696 input, 101 output
+[Featherless] Request req_7 started (cost: 4, total: 4/4)
+[Featherless] Request req_7 completed (remaining: 0/4)
+[Featherless] Token usage: 8116 input, 40 output
+[Featherless] Request req_8 started (cost: 4, total: 4/4)
+[Featherless] Request req_8 completed (remaining: 0/4)
+[Featherless] Token usage: 10398 input, 34 output
+[Featherless] Request req_9 started (cost: 4, total: 4/4)
+[Featherless] Request req_9 completed (remaining: 0/4)
+[Featherless] Token usage: 11054 input, 31 output
+[Featherless] Request req_10 started (cost: 4, total: 4/4)
+[Featherless] Request req_10 completed (remaining: 0/4)
+[Featherless] Token usage: 11755 input, 41 output
+[Featherless] Request req_11 started (cost: 4, total: 4/4)
+[Featherless] Request req_11 completed (remaining: 0/4)
+[Featherless] Token usage: 12215 input, 33 output
+[Featherless] Request req_12 started (cost: 4, total: 4/4)
+[Featherless] Request req_12 completed (remaining: 0/4)
+[Featherless] Token usage: 13274 input, 32 output
+[Featherless] Request req_13 started (cost: 4, total: 4/4)
+[Featherless] Request req_13 completed (remaining: 0/4)
+[Featherless] Token usage: 13842 input, 101 output
+[Featherless] Request req_14 started (cost: 4, total: 4/4)
+[Featherless] Request req_14 completed (remaining: 0/4)
+[Featherless] Token usage: 14562 input, 101 output
+[Featherless] Request req_15 started (cost: 4, total: 4/4)
+[Featherless] Request req_15 completed (remaining: 0/4)
+[Featherless] Token usage: 14613 input, 92 output
+[Featherless] Request req_16 started (cost: 4, total: 4/4)
+[Featherless] Request req_16 completed (remaining: 0/4)
+[Featherless] Token usage: 19606 input, 35 output
+[Featherless] Request req_17 started (cost: 4, total: 4/4)
+[Featherless] Request req_17 completed (remaining: 0/4)
+[Featherless] Token usage: 19647 input, 42 output
+[Featherless] Request req_18 started (cost: 4, total: 4/4)
+[Featherless] Request req_18 completed (remaining: 0/4)
+[Featherless] Token usage: 22525 input, 41 output
+[Featherless] Request req_19 started (cost: 4, total: 4/4)
+[Featherless] Request req_19 completed (remaining: 0/4)
+[Featherless] Token usage: 22562 input, 41 output
+[Featherless] Request req_20 started (cost: 4, total: 4/4)
+[Featherless] Request req_20 completed (remaining: 0/4)
+[Featherless] Token usage: 25101 input, 978 output
+[Featherless] Compaction triggered: 26079 estimated tokens
+[Featherless] Accurate context: 24535 tokens (74.9% of 32768)
+[Featherless] Compaction complete (from extension: false)
