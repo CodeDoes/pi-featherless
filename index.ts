@@ -12,9 +12,19 @@
  *   # Then /login featherless-ai api key, or set FEATHERLESS_API_KEY=...
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage, Model } from "@mariozechner/pi-ai";
+import { completeSimple, calculateCost } from "@mariozechner/pi-ai";
+import {
+    type ExtensionAPI,
+    type ExtensionContext,
+    type SessionBeforeCompactResult,
+    serializeConversation,
+    convertToLlm
+} from "@mariozechner/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { MODELS, getModelConfig, getRealContextLimit, getConcurrencyUse, getModelClass } from "./models";
 import { tokenize, extractText, clearTokenCache } from "./tokenize";
+import { registerSwarmTools } from "./swarm";
 
 const BASE_URL = "https://api.featherless.ai/v1";
 const PROVIDER = "featherless-ai";
@@ -222,6 +232,53 @@ export default function (pi: ExtensionAPI) {
         // Reset concurrency tracking
         concurrency.activeRequests.clear();
         concurrency.totalCost = 0;
+
+        ctx.ui.setFooter((tui, theme, footerData) => {
+            const unsub = footerData.onBranchChange(() => tui.requestRender());
+
+            return {
+                dispose: unsub,
+                invalidate() {},
+                render(width: number): string[] {
+                    let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
+                    
+                    const branch = ctx.sessionManager.getBranch();
+                    for (const entry of branch) {
+                        if (entry.type === "message" && entry.message.role === "assistant") {
+                            const usage = (entry.message as AssistantMessage).usage;
+                            if (usage) {
+                                input += usage.input;
+                                output += usage.output;
+                                cacheRead += usage.cacheRead;
+                                cacheWrite += usage.cacheWrite;
+                                cost += usage.cost.total;
+                            }
+                        }
+                    }
+
+                    const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
+                    
+                    // Featherless specific info: Ctx and Conc
+                    const model = ctx.model;
+                    let ctxStr = "";
+                    if (model?.provider === PROVIDER) {
+                        const sessionFile = ctx.sessionManager.getSessionFile();
+                        const tracker = contextTracker.get(sessionFile);
+                        const realLimit = getRealContextLimit(model.id) || 32768;
+                        const count = tracker?.lastTokenCount || input;
+                        const percent = ((count / realLimit) * 100).toFixed(0);
+                        ctxStr = ` [Ctx: ${percent}%]`;
+                    }
+
+                    const left = theme.fg("dim", `↑${fmt(input)} ↓${fmt(output)} R${fmt(cacheRead)} W${fmt(cacheWrite)} $${cost.toFixed(3)}${ctxStr}`);
+                    const right = theme.fg("dim", `${model?.id || "no-model"}`);
+
+                    const padWidth = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
+                    const pad = " ".repeat(padWidth);
+                    return [truncateToWidth(left + pad + right, width)];
+                },
+            };
+        });
     });
 
     // Log accurate token counts before provider requests (for debugging/visibility)
@@ -555,6 +612,9 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
+    // Register Swarm Tools
+    registerSwarmTools(pi);
+
     // Register a command to manually reset concurrency if it gets stuck
     pi.registerCommand("featherless-reset-concurrency", {
         description: "Reset Featherless concurrency tracking if it gets stuck",
@@ -563,5 +623,136 @@ export default function (pi: ExtensionAPI) {
             concurrency.totalCost = 0;
             ctx.ui.notify("Concurrency tracking reset", "info");
         },
+    });
+
+    // Custom High-Fidelity Compaction
+    pi.on("session_before_compact", async (event, ctx) => {
+        const model = ctx.model;
+        if (!model || model.provider !== PROVIDER) return;
+
+        const { preparation, signal } = event;
+        const { messagesToSummarize, turnPrefixMessages, tokensBefore, firstKeptEntryId, previousSummary } = preparation;
+
+        // Ensure we always have a reserve tokens value
+        const reserveTokens = 16384; 
+        const maxSummaryTokens = Math.floor(0.8 * reserveTokens);
+
+        // We'll use the current model for summarization as well, unless it's too small
+        const summarizerModel = model;
+
+        const apiKey = await getApiKeyFromContext(ctx);
+        if (!apiKey) return;
+
+        ctx.ui.notify(`High-fidelity compaction: ${formatTokenCount(tokensBefore)} tokens...`, "info");
+
+        // Combine for summary
+        const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
+        const conversationText = serializeConversation(convertToLlm(allMessages));
+        const previousContext = previousSummary ? `\n\nPrevious session summary for context:\n${previousSummary}` : "";
+
+        const summaryPrompt = `You are a technical context summarizer. Create a HIGH-FIDELITY structured summary of this conversation for another LLM to continue the work without losing track of details.
+
+RULES:
+1. Preserve ALL exact file paths, function names, and specific error messages.
+2. List all files currently in the conversation's "active set" (files that were read or modified).
+3. Record the CURRENT STATE of the work: what was just attempted, what succeeded, and what failed.
+4. Capture KEY DECISIONS and their rationale.
+5. Identify the next 3-5 concrete steps.
+
+${previousContext}
+
+<conversation>
+${conversationText}
+</conversation>
+
+Use Markdown with clear headers (Goals, Active Files, Progress, Key Decisions, Next Steps).`;
+
+        const messages = [
+            {
+                role: "user" as const,
+                content: [{ type: "text" as const, text: summaryPrompt }],
+                timestamp: Date.now(),
+            },
+        ];
+
+        try {
+            const response = await completeSimple(
+                summarizerModel as Model<any>,
+                { messages },
+                { apiKey, maxTokens: maxSummaryTokens, signal }
+            );
+
+            const summary = response.content
+                .filter((c: any) => c.type === "text")
+                .map((c: any) => c.text)
+                .join("\n");
+
+            if (!summary.trim()) return;
+
+            // Log successful high-fidelity compaction
+            console.log(`[Featherless] High-fidelity summary generated (${summary.length} chars)`);
+
+            return {
+                compaction: {
+                    summary,
+                    firstKeptEntryId,
+                    tokensBefore,
+                }
+            } as SessionBeforeCompactResult;
+        } catch (err) {
+            console.error("[Featherless] High-fidelity compaction failed:", err);
+            return; // Fall back to default
+        }
+    });
+
+    // Custom Footer for Accurate Stats
+    pi.on("session_start", async (_event, ctx) => {
+        // ... previous setup ...
+        
+        ctx.ui.setFooter((tui, theme, footerData) => {
+            const unsub = footerData.onBranchChange(() => tui.requestRender());
+
+            return {
+                dispose: unsub,
+                invalidate() {},
+                render(width: number): string[] {
+                    let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
+                    
+                    const branch = ctx.sessionManager.getBranch();
+                    for (const entry of branch) {
+                        if (entry.type === "message" && entry.message.role === "assistant") {
+                            const usage = (entry.message as AssistantMessage).usage;
+                            if (usage) {
+                                input += usage.input;
+                                output += usage.output;
+                                cacheRead += usage.cacheRead;
+                                cacheWrite += usage.cacheWrite;
+                                cost += usage.cost.total;
+                            }
+                        }
+                    }
+
+                    const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
+                    
+                    // Featherless specific info: Ctx and Conc
+                    const model = ctx.model;
+                    let ctxStr = "";
+                    if (model?.provider === PROVIDER) {
+                        const tracker = contextTracker.get(ctx.sessionManager.getSessionFile());
+                        const realLimit = getRealContextLimit(model.id) || 32768;
+                        const count = tracker?.lastTokenCount || input;
+                        const percent = ((count / realLimit) * 100).toFixed(0);
+                        ctxStr = ` [Ctx: ${percent}%]`;
+                    }
+
+                    const left = theme.fg("dim", `↑${fmt(input)} ↓${fmt(output)} R${fmt(cacheRead)} W${fmt(cacheWrite)} $${cost.toFixed(3)}${ctxStr}`);
+                    const right = theme.fg("dim", `${model?.id || "no-model"}`);
+
+                    const padWidth = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
+                    const pad = " ".repeat(padWidth);
+                    return [truncateToWidth(left + pad + right, width)];
+                },
+            };
+        });
     });
 }

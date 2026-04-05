@@ -10,23 +10,29 @@ interface ModelClass {
     context_limit: number;
     concurrency_use: number;
     chars_per_token?: number;  // Default 3.2 (chars/4 overestimates; real average is ~3.2)
+    cost: {
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+    };
 }
 
 const MODEL_CLASSES: Record<string, ModelClass> = {
-    "glm4-9b": { context_limit: 32768, concurrency_use: 1 },
-    "glm4-32b": { context_limit: 32768, concurrency_use: 2 },
-    "glm47-flash": { context_limit: 32768, concurrency_use: 2 },
-    "glm47-357b": { context_limit: 32768, concurrency_use: 4 },
-    "glm5-754b": { context_limit: 32768, concurrency_use: 4 },
-    "minimax-m25": { context_limit: 32768, concurrency_use: 4 },
-    "kimi-k2": { context_limit: 32768, concurrency_use: 4 },
-    "kimi-k25": { context_limit: 32768, concurrency_use: 4 },
-    "deepseek-v3.2": { context_limit: 32768, concurrency_use: 4 },
-    "deepseek31-685b": { context_limit: 32768, concurrency_use: 4 },
-    "mistral-24b-2503": { context_limit: 32768, concurrency_use: 2 },
-    "qwen3-32b": { context_limit: 32768, concurrency_use: 2, chars_per_token: 3.12 },  // Measured from tokenize API
-    "qwen3-235b": { context_limit: 32768, concurrency_use: 4 },
-    "qwen3-coder-480b": { context_limit: 32768, concurrency_use: 4 },
+    "glm4-9b": { context_limit: 32768, concurrency_use: 1, cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 } },
+    "glm4-32b": { context_limit: 32768, concurrency_use: 2, cost: { input: 0.3, output: 0.3, cacheRead: 0.15, cacheWrite: 0.3 } },
+    "glm47-flash": { context_limit: 32768, concurrency_use: 2, cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 } },
+    "glm47-357b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "glm5-754b": { context_limit: 32768, concurrency_use: 4, cost: { input: 2.0, output: 2.0, cacheRead: 1.0, cacheWrite: 2.0 } },
+    "minimax-m25": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "kimi-k2": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "kimi-k25": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "deepseek-v3.2": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "deepseek31-685b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "mistral-24b-2503": { context_limit: 32768, concurrency_use: 2, cost: { input: 0.5, output: 0.5, cacheRead: 0.25, cacheWrite: 0.5 } },
+    "qwen3-32b": { context_limit: 32768, concurrency_use: 2, chars_per_token: 3.12, cost: { input: 0.4, output: 0.4, cacheRead: 0.2, cacheWrite: 0.4 } },
+    "qwen3-235b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
+    "qwen3-coder-480b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.5, output: 1.5, cacheRead: 0.75, cacheWrite: 1.5 } },
 };
 
 export interface ModelEntry {
@@ -92,7 +98,7 @@ export function getModelConfig(entry: ModelEntry) {
         contextWindow: safeContextWindow,
         maxTokens: mc.context_limit,  // Keep real limit for output
         input: ["text"] as ("text" | "image")[],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        cost: mc.cost,
     };
 }
 
