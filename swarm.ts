@@ -15,6 +15,7 @@ interface SwarmAgent {
     task: string;
     status: "pending" | "running" | "completed" | "failed";
     output: string;
+    lastEvent?: string; // Latest captured event (tool call, thinking, etc)
     process?: ChildProcess;
 }
 
@@ -24,15 +25,18 @@ const activeSwarm = new Map<string, SwarmAgent>();
  * Update the Swarm UI widget
  */
 function updateSwarmWidget(ctx: ExtensionContext) {
-    const lines: string[] = [" 🐝 Swarm Status "];
+    const lines: string[] = [" 🐝 Swarm Activity "];
     
     if (activeSwarm.size === 0) {
         lines.push(" Idle");
     } else {
         for (const agent of activeSwarm.values()) {
             const icon = agent.status === "running" ? "⏳" : agent.status === "completed" ? "✅" : "❌";
-            const taskPreview = agent.task.length > 30 ? agent.task.slice(0, 27) + "..." : agent.task;
-            lines.push(` ${icon} [${agent.id}] ${taskPreview}`);
+            const taskPreview = agent.task.length > 20 ? agent.task.slice(0, 17) + "..." : agent.task;
+            
+            // Add the latest event for live "observation"
+            const eventStr = agent.lastEvent ? ` > ${agent.lastEvent}` : "";
+            lines.push(` ${icon} [${agent.id}] ${taskPreview}${eventStr}`);
         }
     }
     
@@ -54,7 +58,6 @@ async function runSubagent(
 
     return new Promise((resolve, reject) => {
         // Spawn pi in JSON mode for structured output
-        // Note: We use -p (print mode) and --no-session to avoid recursion and TUI conflicts
         const child = spawn("pi", [
             "--model", model,
             "--mode", "json",
@@ -67,32 +70,64 @@ async function runSubagent(
         });
 
         agent.process = child;
-        let stdout = "";
+        let stdoutBuffer = "";
+        let stdoutAccumulated = "";
 
         child.stdout.on("data", (data) => {
-            stdout += data.toString();
-            // Optional: Parse JSON events for real-time progress
+            const chunk = data.toString();
+            stdoutAccumulated += chunk;
+            stdoutBuffer += chunk;
+            
+            // Parse streaming JSON lines to update live status
+            const lines = stdoutBuffer.split("\n");
+            stdoutBuffer = lines.pop() || "";
+            
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const event = JSON.parse(line);
+                    
+                    // Capture high-signal events for the UI
+                    if (event.type === "message_start") {
+                        agent.lastEvent = "Thinking...";
+                    } else if (event.type === "tool_execution_start") {
+                        agent.lastEvent = `Using ${event.toolName}`;
+                    } else if (event.type === "tool_execution_end") {
+                        agent.lastEvent = `Finished ${event.toolName}`;
+                    } else if (event.type === "message_end" && event.message.role === "assistant") {
+                        agent.lastEvent = "Responding...";
+                    }
+                    
+                    updateSwarmWidget(ctx);
+                } catch (e) {
+                    // Ignore partial/invalid JSON
+                }
+            }
         });
 
         child.on("close", (code) => {
             agent.status = code === 0 ? "completed" : "failed";
-            agent.output = stdout;
+            // Capture all previous output before closing
+            agent.lastEvent = code === 0 ? "Done" : `Failed (${code})`;
             updateSwarmWidget(ctx);
             
+            // Re-parse the final output to ensure we didn't miss anything from the last buffer chunk
+            const finalLines = (stdoutBuffer + stdoutAccumulated).split("\n").filter(l => l.trim());
+            let finalContent = "";
+            
             if (code === 0) {
-                // Extract final message from JSON output
                 try {
-                    const lines = stdout.split("\n").filter(l => l.trim());
-                    let finalContent = "";
-                    for (const line of lines) {
-                        const event = JSON.parse(line);
-                        if (event.type === "message_end" && event.message.role === "assistant") {
-                            finalContent = event.message.content.map((c: any) => c.text || "").join("");
-                        }
+                    for (const line of finalLines) {
+                        try {
+                            const event = JSON.parse(line);
+                            if (event.type === "message_end" && event.message.role === "assistant") {
+                                finalContent = event.message.content.map((c: any) => c.text || "").join("");
+                            }
+                        } catch(e) {}
                     }
-                    resolve(finalContent);
+                    resolve(finalContent || stdoutAccumulated);
                 } catch (e) {
-                    resolve(stdout); // Fallback to raw output
+                    resolve(stdoutAccumulated); // Fallback to raw output
                 }
             } else {
                 reject(new Error(`Agent ${id} failed with code ${code}`));
