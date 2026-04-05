@@ -5,26 +5,24 @@
  *   - Accurate token counting via /v1/tokenize API
  *   - Context window management with real token counts
  *   - OAuth support for easy authentication
- *   - Enhanced visibility: status line, cache savings, compaction logging
+ *   - Concurrency tracking for Featherless API
+ *   - High-fidelity compaction summaries
  *
  * Usage:
  *   pi -e git:github.com/CodeDoes/pi-featherless-2
  *   # Then /login featherless-ai api key, or set FEATHERLESS_API_KEY=...
  */
 
-import type { AssistantMessage, Model } from "@mariozechner/pi-ai";
-import { completeSimple, calculateCost } from "@mariozechner/pi-ai";
+import type { Model } from "@mariozechner/pi-ai";
+import { completeSimple } from "@mariozechner/pi-ai";
 import {
     type ExtensionAPI,
-    type ExtensionContext,
     type SessionBeforeCompactResult,
     serializeConversation,
     convertToLlm
 } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { MODELS, getModelConfig, getRealContextLimit, getConcurrencyUse, getModelClass } from "./models";
 import { tokenize, extractText, clearTokenCache } from "./tokenize";
-import { registerSwarmTools } from "./swarm";
 
 const BASE_URL = "https://api.featherless.ai/v1";
 const PROVIDER = "featherless-ai";
@@ -40,20 +38,9 @@ function formatTokenCount(count: number): string {
 }
 
 /**
- * Get the current Featherless model from context.
- */
-function getCurrentModel(ctx: ExtensionContext): string | undefined {
-    const model = ctx.model;
-    if (model?.provider === PROVIDER) {
-        return model.id;
-    }
-    return undefined;
-}
-
-/**
  * Get the API key from environment or OAuth credentials.
  */
-async function getApiKeyFromContext(ctx: ExtensionContext): Promise<string | undefined> {
+async function getApiKeyFromContext(ctx: any): Promise<string | undefined> {
     // Try model registry first (async method)
     if (ctx.modelRegistry) {
         const key = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER);
@@ -195,29 +182,7 @@ export default function (pi: ExtensionAPI) {
     pi.on("model_select", async (event, ctx) => {
         const { model } = event;
         if (model.provider !== PROVIDER) {
-            // Remove status if we switch away from Featherless
-            ctx.ui.setStatus("featherless", undefined);
             return;
-        }
-
-        const realContextWindow = getRealContextLimit(model.id);
-        const tracker = contextTracker.get(ctx.sessionManager.getSessionFile());
-        
-        const updateStatus = (tokenCount: number) => {
-            if (!realContextWindow) return;
-            const percent = ((tokenCount / realContextWindow) * 100).toFixed(0);
-            const statusParts = [`Ctx: ${percent}%`];
-            if (cacheStats.tokensSaved > 0) {
-                statusParts.push(`Cache: ${formatTokenCount(cacheStats.tokensSaved)}`);
-            }
-            ctx.ui.setStatus("featherless", ctx.ui.theme.fg("muted", statusParts.join(" | ")));
-        };
-
-        if (tracker && tracker.lastTokenCount > 0) {
-            updateStatus(tracker.lastTokenCount);
-        } else {
-            // Initial status for Featherless model
-            ctx.ui.setStatus("featherless", ctx.ui.theme.fg("muted", "Ctx: 0%"));
         }
     });
 
@@ -232,53 +197,6 @@ export default function (pi: ExtensionAPI) {
         // Reset concurrency tracking
         concurrency.activeRequests.clear();
         concurrency.totalCost = 0;
-
-        ctx.ui.setFooter((tui, theme, footerData) => {
-            const unsub = footerData.onBranchChange(() => tui.requestRender());
-
-            return {
-                dispose: unsub,
-                invalidate() {},
-                render(width: number): string[] {
-                    let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
-                    
-                    const branch = ctx.sessionManager.getBranch();
-                    for (const entry of branch) {
-                        if (entry.type === "message" && entry.message.role === "assistant") {
-                            const usage = (entry.message as AssistantMessage).usage;
-                            if (usage) {
-                                input += usage.input;
-                                output += usage.output;
-                                cacheRead += usage.cacheRead;
-                                cacheWrite += usage.cacheWrite;
-                                cost += usage.cost.total;
-                            }
-                        }
-                    }
-
-                    const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
-                    
-                    // Featherless specific info: Ctx and Conc
-                    const model = ctx.model;
-                    let ctxStr = "";
-                    if (model?.provider === PROVIDER) {
-                        const sessionFile = ctx.sessionManager.getSessionFile();
-                        const tracker = contextTracker.get(sessionFile);
-                        const realLimit = getRealContextLimit(model.id) || 32768;
-                        const count = tracker?.lastTokenCount || input;
-                        const percent = ((count / realLimit) * 100).toFixed(0);
-                        ctxStr = ` [Ctx: ${percent}%]`;
-                    }
-
-                    const left = theme.fg("dim", `↑${fmt(input)} ↓${fmt(output)} R${fmt(cacheRead)} W${fmt(cacheWrite)} $${cost.toFixed(3)}${ctxStr}`);
-                    const right = theme.fg("dim", `${model?.id || "no-model"}`);
-
-                    const padWidth = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
-                    const pad = " ".repeat(padWidth);
-                    return [truncateToWidth(left + pad + right, width)];
-                },
-            };
-        });
     });
 
     // Log accurate token counts before provider requests (for debugging/visibility)
@@ -324,27 +242,8 @@ export default function (pi: ExtensionAPI) {
         const sessionFile = ctx.sessionManager.getSessionFile();
         const tracker = contextTracker.get(sessionFile);
         
-        // Build status line with context and concurrency
-        const buildStatus = (tokenCount: number) => {
-            const percent = ((tokenCount / realContextWindow) * 100).toFixed(0);
-            const parts = [`Ctx: ${percent}%`];
-            
-            // Show concurrency usage if we have requests in flight
-            if (concurrency.totalCost > 0) {
-                const concColor = concurrency.totalCost >= concurrency.limit ? 'red' : 'yellow';
-                parts.push(`Conc: ${concurrency.totalCost}/${concurrency.limit}`);
-            }
-            
-            if (cacheStats.tokensSaved > 0) {
-                parts.push(`Cache: ${formatTokenCount(cacheStats.tokensSaved)}`);
-            }
-            
-            return parts.join(' | ');
-        };
-        
         if (tracker && tracker.lastTokenCount > 0 && tracker.charsSinceLastCheck < CHAR_CHECK_THRESHOLD) {
             // Use cached count - it's still accurate enough
-            ctx.ui.setStatus("featherless", ctx.ui.theme.fg("muted", buildStatus(tracker.lastTokenCount)));
             return;
         }
 
@@ -358,8 +257,7 @@ export default function (pi: ExtensionAPI) {
             
             // Update tracker
             contextTracker.set(sessionFile, { charsSinceLastCheck: 0, lastTokenCount: tokenCount });
-
-            ctx.ui.setStatus("featherless", ctx.ui.theme.fg("muted", buildStatus(tokenCount)));
+            console.log(`[Featherless] Context: ${tokenCount} tokens`);
         } catch (err) {
             handleApiError(err);
         }
@@ -423,24 +321,6 @@ export default function (pi: ExtensionAPI) {
             if (cacheWrite > 0) parts.push(`${cacheWrite} cache write`);
             
             console.log(`[Featherless] Token usage: ${parts.join(", ")}`);
-            
-            // Update status line with cache info
-            const realContextWindow = getRealContextLimit(model.id);
-            if (realContextWindow) {
-                const percent = ((usage.input / realContextWindow) * 100).toFixed(0);
-                const statusParts = [`Ctx: ${percent}%`];
-                
-                // Show concurrency usage
-                if (concurrency.totalCost > 0) {
-                    statusParts.push(`Conc: ${concurrency.totalCost}/${concurrency.limit}`);
-                }
-                
-                if (cacheStats.tokensSaved > 0) {
-                    statusParts.push(`Cache: ${formatTokenCount(cacheStats.tokensSaved)}`);
-                }
-                
-                ctx.ui.setStatus("featherless", ctx.ui.theme.fg("muted", statusParts.join(" | ")));
-            }
         }
     });
 
@@ -491,51 +371,13 @@ export default function (pi: ExtensionAPI) {
             tracker.charsSinceLastCheck = 0;  // Reset delta
             contextTracker.set(sessionFile, tracker);
 
-            // Update status line with current context usage
+            // Log context usage
             const percent = ((tokenCount / realContextWindow) * 100).toFixed(0);
-            const statusParts = [`Ctx: ${percent}%`];
-            
-            if (cacheStats.tokensSaved > 0) {
-                statusParts.push(`Cache: ${formatTokenCount(cacheStats.tokensSaved)} saved`);
-            }
-            
-            ctx.ui.setStatus("featherless", ctx.ui.theme.fg("muted", statusParts.join(" | ")));
             console.log(`[Featherless] Context: ${tokenCount} / ${realContextWindow} tokens (${percent}%)`);
         } catch (err) {
             handleApiError(err);
             console.warn(`[Featherless] Failed to check context tokens:`, err);
         }
-    });
-
-    // Register a command to manually check token count
-    pi.registerCommand("featherless-tokens", {
-        description: "Count tokens for the current context using Featherless API",
-        handler: async (_args, ctx) => {
-            const model = ctx.model;
-            if (!model || model.provider !== PROVIDER) {
-                ctx.ui.notify("Please select a Featherless model first", "error");
-                return;
-            }
-
-            const messages = ctx.sessionManager.getBranch()
-                .filter((e: any) => e.type === "message")
-                .map((e: any) => e.message);
-
-            if (messages.length === 0) {
-                ctx.ui.notify("No messages in context", "info");
-                return;
-            }
-
-            const apiKey = await getApiKeyFromContext(ctx);
-            const tokenCount = await countContextTokens(model.id, messages, apiKey);
-            const contextWindow = model.contextWindow;
-            const percentUsed = ((tokenCount / contextWindow) * 100).toFixed(1);
-
-            ctx.ui.notify(
-                `Context: ${tokenCount.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${percentUsed}% used)`,
-                "info"
-            );
-        },
     });
 
     // Log compaction trigger points with accurate counts
@@ -560,12 +402,6 @@ export default function (pi: ExtensionAPI) {
                 const accurateCount = await countContextTokens(model.id, messages, apiKey);
                 const percent = realContextWindow ? ((accurateCount / realContextWindow) * 100).toFixed(1) : "?";
                 console.log(`[Featherless] Accurate context: ${accurateCount} tokens (${percent}% of ${realContextWindow || "unknown"})`);
-                
-                // Show notification with accurate context size
-                ctx.ui.notify(
-                    `Compacting: ${formatTokenCount(accurateCount)} / ${formatTokenCount(realContextWindow || 0)} tokens (${percent}%)`,
-                    "warning"
-                );
             } catch (err) {
                 handleApiError(err);
                 console.warn(`[Featherless] Failed to get accurate token count:`, err);
@@ -579,63 +415,6 @@ export default function (pi: ExtensionAPI) {
         if (model?.provider !== PROVIDER) return;
         
         console.log(`[Featherless] Compaction complete (from extension: ${event.fromExtension})`);
-        
-        // Clear status after compaction
-        ctx.ui.setStatus("featherless", undefined);
-    });
-
-    // Register a command to clear the token cache
-    pi.registerCommand("featherless-clear-cache", {
-        description: "Clear the Featherless tokenization cache",
-        handler: async (_args, ctx) => {
-            clearTokenCache();
-            ctx.ui.notify("Token cache cleared", "info");
-        },
-    });
-    
-    // Register a command to show cache statistics
-    pi.registerCommand("featherless-cache-stats", {
-        description: "Show Featherless cache statistics",
-        handler: async (_args, ctx) => {
-            const { getCacheStats } = await import("./tokenize");
-            const stats = getCacheStats();
-            
-            ctx.ui.notify(
-                `Cache: ${stats.size.toLocaleString()} entries | Savings: ${formatTokenCount(cacheStats.tokensSaved)} (${cacheStats.hits} hits)`,
-                "info"
-            );
-        },
-    });
-    
-    // Register a command to show concurrency status
-    pi.registerCommand("featherless-concurrency", {
-        description: "Show Featherless concurrency usage",
-        handler: async (_args, ctx) => {
-            const activeCount = concurrency.activeRequests.size;
-            const percent = Math.round((concurrency.totalCost / concurrency.limit) * 100);
-            const status = concurrency.totalCost >= concurrency.limit ? 'FULL' : 'available';
-            
-            ctx.ui.notify(
-                `Concurrency: ${concurrency.totalCost}/${concurrency.limit} units (${percent}%, ${status}) | ${activeCount} active request${activeCount !== 1 ? 's' : ''}`,
-                concurrency.totalCost >= concurrency.limit ? "warning" : "info"
-            );
-        },
-    });
-
-    // Export helper for swarm logic
-    (pi as any)._releaseConcurrency = (modelId: string) => releaseConcurrency(modelId);
-
-    // Register Swarm Tools
-    registerSwarmTools(pi);
-
-    // Register a command to manually reset concurrency if it gets stuck
-    pi.registerCommand("featherless-reset-concurrency", {
-        description: "Reset Featherless concurrency tracking if it gets stuck",
-        handler: async (_args, ctx) => {
-            concurrency.activeRequests.clear();
-            concurrency.totalCost = 0;
-            ctx.ui.notify("Concurrency tracking reset", "info");
-        },
     });
 
     // Custom High-Fidelity Compaction
@@ -656,7 +435,7 @@ export default function (pi: ExtensionAPI) {
         const apiKey = await getApiKeyFromContext(ctx);
         if (!apiKey) return;
 
-        ctx.ui.notify(`High-fidelity compaction: ${formatTokenCount(tokensBefore)} tokens...`, "info");
+        console.log(`[Featherless] High-fidelity compaction: ${formatTokenCount(tokensBefore)} tokens...`);
 
         // Combine for summary
         const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
@@ -716,56 +495,5 @@ Use Markdown with clear headers (Goals, Active Files, Progress, Key Decisions, N
             console.error("[Featherless] High-fidelity compaction failed:", err);
             return; // Fall back to default
         }
-    });
-
-    // Custom Footer for Accurate Stats
-    pi.on("session_start", async (_event, ctx) => {
-        // ... previous setup ...
-        
-        ctx.ui.setFooter((tui, theme, footerData) => {
-            const unsub = footerData.onBranchChange(() => tui.requestRender());
-
-            return {
-                dispose: unsub,
-                invalidate() {},
-                render(width: number): string[] {
-                    let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
-                    
-                    const branch = ctx.sessionManager.getBranch();
-                    for (const entry of branch) {
-                        if (entry.type === "message" && entry.message.role === "assistant") {
-                            const usage = (entry.message as AssistantMessage).usage;
-                            if (usage) {
-                                input += usage.input;
-                                output += usage.output;
-                                cacheRead += usage.cacheRead;
-                                cacheWrite += usage.cacheWrite;
-                                cost += usage.cost.total;
-                            }
-                        }
-                    }
-
-                    const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
-                    
-                    // Featherless specific info: Ctx and Conc
-                    const model = ctx.model;
-                    let ctxStr = "";
-                    if (model?.provider === PROVIDER) {
-                        const tracker = contextTracker.get(ctx.sessionManager.getSessionFile());
-                        const realLimit = getRealContextLimit(model.id) || 32768;
-                        const count = tracker?.lastTokenCount || input;
-                        const percent = ((count / realLimit) * 100).toFixed(0);
-                        ctxStr = ` [Ctx: ${percent}%]`;
-                    }
-
-                    const left = theme.fg("dim", `↑${fmt(input)} ↓${fmt(output)} R${fmt(cacheRead)} W${fmt(cacheWrite)} $${cost.toFixed(3)}${ctxStr}`);
-                    const right = theme.fg("dim", `${model?.id || "no-model"}`);
-
-                    const padWidth = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
-                    const pad = " ".repeat(padWidth);
-                    return [truncateToWidth(left + pad + right, width)];
-                },
-            };
-        });
     });
 }
