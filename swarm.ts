@@ -10,10 +10,11 @@ const SCANNER_MODEL = "featherless-ai/zai-org/GLM-4-9B"; // Cost: 1 (fast, cheap
 const WRITER_MODEL = "featherless-ai/Qwen/Qwen3-32B";   // Cost: 2 (high precision writing)
 
 const SCANNER_SYSTEM_PROMPT = `You are a high-speed codebase scanner. 
-Your goal is to extract specific information from a file with maximum conciseness.
-- Ignore boilerplate and unrelated logic.
-- Provide only the relevant code snippets, facts, or data points requested.
-- Use a dense, technical style. No conversational filler.`;
+Your goal is to quickly summarize a file's purpose, key logic, and exported interface so a smarter "architect" model can decide how to use it.
+- Identify the core responsibility of the file.
+- List key functions, classes, or data structures.
+- Briefly explain any complex logic.
+- Be technical and extremely concise.`;
 
 interface SwarmAgent {
     id: string;
@@ -189,12 +190,13 @@ export function registerSwarmTools(pi: ExtensionAPI) {
         async execute(toolCallId, params: any, signal, onUpdate, ctx) {
             const { files, query } = params;
             
-            ctx.ui.notify(`Launching swarm to scan ${files.length} files...`, "info");
+            ctx.ui.notify(`Launching swarm to analyze ${files.length} files...`, "info");
             
             // Run in parallel with concurrency limit (respecting Featherless plan)
             const results = await Promise.all(files.map((file: string, index: number) => {
                 const id = `scan-${index}`;
-                const task = `Read file ${file} and find: ${query}. Return only the relevant code or facts. Be extremely concise.`;
+                const task = `Analyze file ${file}. Context for analysis: ${query}. 
+Report back on the file's purpose and contents as they relate to this query.`;
                 return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT);
             }));
 
