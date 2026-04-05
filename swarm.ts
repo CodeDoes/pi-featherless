@@ -6,8 +6,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 /**
  * Swarm Configuration
  */
-const SCANNER_MODEL = "featherless-ai/zai-org/GLM-4.7-Flash"; // Cost: 2 (safest low-cost model)
-const WRITER_MODEL = "featherless-ai/Qwen/Qwen3-32B";        // Cost: 2 (high precision)
+const SCANNER_MODEL = "featherless-ai/zai-org/GLM-5"; // Using GLM-5 for quality scanning
+const WRITER_MODEL = "featherless-ai/Qwen/Qwen3-32B"; // High precision writing
 
 interface SwarmAgent {
     id: string;
@@ -70,6 +70,18 @@ async function runSubagent(
         });
 
         agent.process = child;
+
+        // Handle ESC / Abort signal
+        const onAbort = () => {
+            if (!child.killed) {
+                child.kill("SIGINT");
+                agent.status = "failed";
+                agent.lastEvent = "Interrupted (ESC)";
+                updateSwarmWidget(ctx);
+            }
+        };
+        signal?.addEventListener("abort", onAbort);
+
         let stdoutBuffer = "";
         let stdoutAccumulated = "";
 
@@ -88,7 +100,18 @@ async function runSubagent(
                     const event = JSON.parse(line);
                     
                     // Capture high-signal events for the UI
-                    if (event.type === "message_start") {
+                    if (event.type === "message_update" && event.message.role === "assistant") {
+                        // Capture streaming thinking and text
+                        const content = event.message.content || [];
+                        const lastBlock = content[content.length - 1];
+                        if (lastBlock?.type === "thinking") {
+                            const thought = lastBlock.thinking || "";
+                            agent.lastEvent = thought.length > 25 ? thought.slice(-22) + "..." : thought;
+                        } else if (lastBlock?.type === "text") {
+                            const text = lastBlock.text || "";
+                            agent.lastEvent = text.length > 25 ? text.slice(-22) + "..." : text;
+                        }
+                    } else if (event.type === "message_start") {
                         agent.lastEvent = "Thinking...";
                     } else if (event.type === "tool_execution_start") {
                         agent.lastEvent = `Using ${event.toolName}`;
