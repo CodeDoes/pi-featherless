@@ -366,11 +366,21 @@ export default function (pi: ExtensionAPI) {
     });
 
     // Helper to release concurrency cost
-    const releaseConcurrency = (modelId: string) => {
+    const releaseConcurrency = (modelId: string, requestId?: string) => {
+        if (requestId) {
+            const cost = concurrency.activeRequests.get(requestId);
+            if (cost !== undefined) {
+                concurrency.activeRequests.delete(requestId);
+                concurrency.totalCost -= cost;
+                console.log(`[Featherless] Request ${requestId} released (total: ${concurrency.totalCost}/${concurrency.limit})`);
+                return true;
+            }
+        }
+
         const modelClass = getModelClass(modelId);
         if (modelClass && concurrency.totalCost > 0) {
             const cost = getConcurrencyUse(modelClass);
-            // Find and remove a request with this cost (approximate)
+            // Find and remove a request with this cost (approximate fallback)
             for (const [id, c] of concurrency.activeRequests) {
                 if (c === cost) {
                     concurrency.activeRequests.delete(id);
@@ -611,6 +621,9 @@ export default function (pi: ExtensionAPI) {
             );
         },
     });
+
+    // Export helper for swarm logic
+    (pi as any)._releaseConcurrency = (modelId: string) => releaseConcurrency(modelId);
 
     // Register Swarm Tools
     registerSwarmTools(pi);

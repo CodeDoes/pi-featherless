@@ -174,6 +174,15 @@ export function registerSwarmTools(pi: ExtensionAPI) {
         },
         async execute(toolCallId, params: any, signal, onUpdate, ctx) {
             const { files, query } = params;
+            
+            // PAUSE MECHANISM: Releasing concurrency of the main agent while the swarm runs
+            // This allows the subagents (cost 1 each) to use the 4 units of CC.
+            const modelId = ctx.model?.id;
+            const released = modelId ? (pi as any)._releaseConcurrency?.(modelId) : false;
+            if (released) {
+                ctx.ui.notify("Main agent CC yielded to swarm.", "info");
+            }
+
             const uiInterval = setInterval(() => updateSwarmWidget(ctx), 500);
             
             try {
@@ -196,6 +205,9 @@ export function registerSwarmTools(pi: ExtensionAPI) {
                 clearInterval(uiInterval);
                 activeSwarm.clear();
                 updateSwarmWidget(ctx);
+                
+                // RESTORE MECHANISM: The main agent's turn will automatically re-register 
+                // its concurrency on the next provider request after this tool returns.
             }
         }
     });
