@@ -6,8 +6,14 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 /**
  * Swarm Configuration
  */
-const SCANNER_MODEL = "featherless-ai/zai-org/GLM-5"; // Using GLM-5 for quality scanning
-const WRITER_MODEL = "featherless-ai/Qwen/Qwen3-32B"; // High precision writing
+const SCANNER_MODEL = "featherless-ai/zai-org/GLM-4-9B"; // Cost: 1 (fast, cheap parallel scanning)
+const WRITER_MODEL = "featherless-ai/Qwen/Qwen3-32B";   // Cost: 2 (high precision writing)
+
+const SCANNER_SYSTEM_PROMPT = `You are a high-speed codebase scanner. 
+Your goal is to extract specific information from a file with maximum conciseness.
+- Ignore boilerplate and unrelated logic.
+- Provide only the relevant code snippets, facts, or data points requested.
+- Use a dense, technical style. No conversational filler.`;
 
 interface SwarmAgent {
     id: string;
@@ -50,7 +56,8 @@ async function runSubagent(
     ctx: ExtensionContext, 
     id: string, 
     model: string, 
-    task: string
+    task: string,
+    systemPrompt?: string
 ): Promise<string> {
     const agent: SwarmAgent = { id, model, task, status: "running", output: "" };
     activeSwarm.set(id, agent);
@@ -58,13 +65,20 @@ async function runSubagent(
 
     return new Promise((resolve, reject) => {
         // Spawn pi in JSON mode for structured output
-        const child = spawn("pi", [
+        const args = [
             "--model", model,
             "--mode", "json",
             "-p",
-            "--no-session",
-            task
-        ], {
+            "--no-session"
+        ];
+
+        if (systemPrompt) {
+            args.push("--system-prompt", systemPrompt);
+        }
+
+        args.push(task);
+
+        const child = spawn("pi", args, {
             cwd: ctx.cwd,
             env: { ...process.env, FEATHERLESS_SWARM_MEMBER: "1" }
         });
@@ -181,7 +195,7 @@ export function registerSwarmTools(pi: ExtensionAPI) {
             const results = await Promise.all(files.map((file: string, index: number) => {
                 const id = `scan-${index}`;
                 const task = `Read file ${file} and find: ${query}. Return only the relevant code or facts. Be extremely concise.`;
-                return runSubagent(ctx, id, SCANNER_MODEL, task);
+                return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT);
             }));
 
             // Clear swarm after completion
