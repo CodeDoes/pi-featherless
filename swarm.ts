@@ -11,10 +11,13 @@ const WRITER_MODEL = "featherless-ai/Qwen/Qwen3-32B";   // Cost: 2 (high precisi
 
 const SCANNER_SYSTEM_PROMPT = `You are a high-speed codebase scanner. 
 Your goal is to quickly summarize a file's purpose, key logic, and exported interface so a smarter "architect" model can decide how to use it.
-- Identify the core responsibility of the file.
-- List key functions, classes, or data structures.
-- Briefly explain any complex logic.
-- Be technical and extremely concise.`;
+
+RULES:
+1. FOCUS: Pay special attention to parts of the file relevant to the ARCHITECT'S QUERY.
+2. CORE RESPONSIBILITY: Identify what the file does.
+3. INTERFACE: List key functions, classes, or data structures.
+4. LOGIC: Briefly explain any complex logic or unique patterns.
+5. CONCISENESS: Be technical and extremely concise. No conversational filler.`;
 
 interface SwarmAgent {
     id: string;
@@ -195,8 +198,9 @@ export function registerSwarmTools(pi: ExtensionAPI) {
             // Run in parallel with concurrency limit (respecting Featherless plan)
             const results = await Promise.all(files.map((file: string, index: number) => {
                 const id = `scan-${index}`;
-                const task = `Analyze file ${file}. Context for analysis: ${query}. 
-Report back on the file's purpose and contents as they relate to this query.`;
+                const task = `ARCHITECT'S QUERY: "${query}"
+Analyze file: ${file}
+Report back on the file's purpose and contents as they relate to the architect's query.`;
                 return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT);
             }));
 
