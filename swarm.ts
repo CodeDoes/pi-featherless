@@ -32,23 +32,47 @@ interface SwarmAgent {
 const activeSwarm = new Map<string, SwarmAgent>();
 
 /**
- * Update the Swarm UI widget
+ * Update the Swarm UI widget with a high-signal "Beehive" view
  */
 function updateSwarmWidget(ctx: ExtensionContext) {
-    const lines: string[] = [" 🐝 Swarm Activity "];
+    const theme = ctx.ui.theme;
+    const lines: string[] = [
+        theme.fg("accent", theme.bold(" 🐝 FEATHERLESS BEEHIVE ")) + theme.fg("muted", `[${activeSwarm.size} AGENTS ACTIVE] ─────────────────`)
+    ];
     
     if (activeSwarm.size === 0) {
-        lines.push(" Idle");
+        lines.push(theme.fg("muted", "  Waiting for instructions..."));
     } else {
         for (const agent of activeSwarm.values()) {
-            const icon = agent.status === "running" ? "⏳" : agent.status === "completed" ? "✅" : "❌";
-            const taskPreview = agent.task.length > 20 ? agent.task.slice(0, 17) + "..." : agent.task;
+            let statusIcon = "";
+            let statusColor: any = "muted";
             
-            // Add the latest event for live "observation"
-            const eventStr = agent.lastEvent ? ` > ${agent.lastEvent}` : "";
-            lines.push(` ${icon} [${agent.id}] ${taskPreview}${eventStr}`);
+            switch (agent.status) {
+                case "running":
+                    // Activity pulse animation based on current event
+                    const isTool = agent.lastEvent?.startsWith("Using");
+                    statusIcon = isTool ? "⚙️" : "🧠";
+                    statusColor = isTool ? "yellow" : "cyan";
+                    break;
+                case "completed":
+                    statusIcon = "✅";
+                    statusColor = "success";
+                    break;
+                case "failed":
+                    statusIcon = "❌";
+                    statusColor = "error";
+                    break;
+            }
+
+            const idStr = theme.fg("accent", `[${agent.id}]`);
+            const eventStr = agent.lastEvent ? theme.fg(statusColor, ` ${agent.lastEvent}`) : theme.fg("muted", " Initializing...");
+            const taskStr = theme.fg("dim", ` (${agent.task.slice(0, 40)}...)`);
+            
+            lines.push(` ${statusIcon} ${idStr}${eventStr}${taskStr}`);
         }
     }
+    
+    lines.push(theme.fg("muted", " ─────────────────────────────────────────────────────────────"));
     
     ctx.ui.setWidget("featherless-swarm", lines, { placement: "aboveEditor" });
 }
@@ -61,7 +85,8 @@ async function runSubagent(
     id: string, 
     model: string, 
     task: string,
-    systemPrompt?: string
+    systemPrompt?: string,
+    signal?: AbortSignal
 ): Promise<string> {
     const agent: SwarmAgent = { id, model, task, status: "running", output: "" };
     activeSwarm.set(id, agent);
@@ -201,7 +226,7 @@ export function registerSwarmTools(pi: ExtensionAPI) {
                 const task = `ARCHITECT'S QUERY: "${query}"
 Analyze file: ${file}
 Report back on the file's purpose and contents as they relate to the architect's query.`;
-                return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT);
+                return runSubagent(ctx, id, SCANNER_MODEL, task, SCANNER_SYSTEM_PROMPT, signal);
             }));
 
             // Clear swarm after completion
@@ -232,7 +257,7 @@ Report back on the file's purpose and contents as they relate to the architect's
             const id = "writer";
             const task = `Modify file ${path} according to this plan: ${plan}. Verify your changes by reading the file back.`;
             
-            const result = await runSubagent(ctx, id, WRITER_MODEL, task);
+            const result = await runSubagent(ctx, id, WRITER_MODEL, task, undefined, signal);
             
             activeSwarm.clear();
             updateSwarmWidget(ctx);
