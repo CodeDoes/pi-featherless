@@ -18,7 +18,7 @@ import { completeSimple } from "@mariozechner/pi-ai";
 import {
     type ExtensionAPI,
     type CompactionResult,
-    type SessionBeforeCompactResult,
+    type SessionBeforeCompactEvent,
     serializeConversation,
     convertToLlm,
 } from "@mariozechner/pi-coding-agent";
@@ -417,7 +417,6 @@ export default function (pi: ExtensionAPI) {
             console.warn(`[Featherless] Failed to check context tokens:`, err);
         }
     });
-
     // Log compaction trigger points with accurate counts
     pi.on("session_before_compact", async (event, ctx) => {
         const model = ctx.model;
@@ -541,7 +540,7 @@ export default function (pi: ExtensionAPI) {
                     firstKeptEntryId,
                     tokensBefore,
                 },
-            } as SessionBeforeCompactResult;
+            };
         } catch (err) {
             console.error(
                 "[Featherless] High-fidelity compaction failed:",
