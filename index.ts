@@ -13,20 +13,28 @@
  *   # Then /login featherless-ai api key, or set FEATHERLESS_API_KEY=...
  */
 
-import type { Model } from "@mariozechner/pi-ai";
+import type { Context, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
 import {
     type ExtensionAPI,
+    type CompactionResult,
     type SessionBeforeCompactResult,
     serializeConversation,
-    convertToLlm
+    convertToLlm,
 } from "@mariozechner/pi-coding-agent";
-import { MODELS, getModelConfig, getRealContextLimit, getConcurrencyUse, getModelClass } from "./models";
+import {
+    MODELS,
+    getModelConfig,
+    getRealContextLimit,
+    getConcurrencyUse,
+    getModelClass,
+} from "./models";
 import { tokenize, extractText, clearTokenCache } from "./tokenize";
+import { readFileSync } from "fs";
 
 const BASE_URL = "https://api.featherless.ai/v1";
 const PROVIDER = "featherless-ai";
-
+const summaryPrompt = readFileSync("./summaryPrompt.txt").toString();
 /**
  * Format token count for human-readable display.
  * E.g., 1500 -> "1.5k", 2300000 -> "2.3M"
@@ -58,7 +66,7 @@ async function getApiKeyFromContext(ctx: any): Promise<string | undefined> {
 async function countContextTokens(
     model: string,
     messages: any[],
-    apiKey: string | undefined
+    apiKey: string | undefined,
 ): Promise<number> {
     let total = 0;
     for (const msg of messages) {
@@ -79,10 +87,13 @@ async function countContextTokens(
  * Track context state across tool results.
  * We track character delta and call API when threshold is exceeded.
  */
-const contextTracker = new Map<string, {
-    charsSinceLastCheck: number;  // Characters added since last API call
-    lastTokenCount: number;       // Last accurate token count from API
-}>();
+const contextTracker = new Map<
+    string,
+    {
+        charsSinceLastCheck: number; // Characters added since last API call
+        lastTokenCount: number; // Last accurate token count from API
+    }
+>();
 
 /**
  * Character threshold for triggering an API token check.
@@ -95,8 +106,8 @@ const CHAR_CHECK_THRESHOLD = 10000;
  * Tracks cumulative cache hits and tokens saved.
  */
 interface CacheStats {
-    hits: number;          // Number of cache hits
-    tokensSaved: number;   // Total tokens saved by caching
+    hits: number; // Number of cache hits
+    tokensSaved: number; // Total tokens saved by caching
     lastCacheRead: number; // Last turn's cache read tokens
 }
 const cacheStats: CacheStats = { hits: 0, tokensSaved: 0, lastCacheRead: 0 };
@@ -106,14 +117,14 @@ const cacheStats: CacheStats = { hits: 0, tokensSaved: 0, lastCacheRead: 0 };
  * Tracks in-flight requests and their concurrency cost.
  */
 interface ConcurrencyState {
-    activeRequests: Map<string, number>;  // requestId -> concurrency cost
-    totalCost: number;                     // Sum of all active request costs
-    limit: number;                         // User's plan limit (from 429 errors)
+    activeRequests: Map<string, number>; // requestId -> concurrency cost
+    totalCost: number; // Sum of all active request costs
+    limit: number; // User's plan limit (from 429 errors)
 }
 const concurrency: ConcurrencyState = {
     activeRequests: new Map(),
     totalCost: 0,
-    limit: 4,  // Default assumption; updated from 429 responses
+    limit: 4, // Default assumption; updated from 429 responses
 };
 let requestIdCounter = 0;
 
@@ -134,13 +145,15 @@ function parse429Limit(errorText: string): number | null {
  */
 function handleApiError(error: any): void {
     const message = error?.message || String(error);
-    
+
     // Check for 429 concurrency limit errors
-    if (message.includes('429') || message.includes('Concurrency limit')) {
+    if (message.includes("429") || message.includes("Concurrency limit")) {
         const limit = parse429Limit(message);
         if (limit !== null) {
             concurrency.limit = limit;
-            console.log(`[Featherless] Updated concurrency limit from 429: ${limit}`);
+            console.log(
+                `[Featherless] Updated concurrency limit from 429: ${limit}`,
+            );
         }
     }
 }
@@ -208,7 +221,7 @@ export default function (pi: ExtensionAPI) {
         const modelId = model.id;
         const modelClass = getModelClass(modelId);
         const realContextWindow = getRealContextLimit(modelId);
-        
+
         // Track concurrency cost for this request
         if (modelClass) {
             // Check if we already have an active request for this model class to avoid double-counting
@@ -216,33 +229,41 @@ export default function (pi: ExtensionAPI) {
             // We'll use the model class as a coarse lock for now, though it's not perfect
             // if multiple requests for different models of the same class are in flight.
             const cost = getConcurrencyUse(modelClass);
-            
+
             // Check if there's already an active request with this cost from this provider
             // This is a heuristic to prevent double-counting within the same turn.
-            const alreadyTracked = Array.from(concurrency.activeRequests.values()).some(c => c === cost);
+            const alreadyTracked = Array.from(
+                concurrency.activeRequests.values(),
+            ).some((c) => c === cost);
             if (alreadyTracked && concurrency.totalCost > 0) {
-                // Potential double-count, but we don't have a reliable way to link 
+                // Potential double-count, but we don't have a reliable way to link
                 // before_provider_request to turn_end yet without a shared ID.
-                // For now, we'll just log and continue, but in a real scenario 
+                // For now, we'll just log and continue, but in a real scenario
                 // we'd want a more robust way to track individual requests.
             }
 
             const requestId = `req_${++requestIdCounter}`;
             concurrency.activeRequests.set(requestId, cost);
             concurrency.totalCost += cost;
-            console.log(`[Featherless] Request ${requestId} started (cost: ${cost}, total: ${concurrency.totalCost}/${concurrency.limit})`);
-            
+            console.log(
+                `[Featherless] Request ${requestId} started (cost: ${cost}, total: ${concurrency.totalCost}/${concurrency.limit})`,
+            );
+
             // Store requestId in event for later cleanup
             (event as any)._featherlessRequestId = requestId;
         }
-        
+
         if (!realContextWindow) return;
 
         // Check if we have a cached token count from tool_result tracking
-        const sessionFile = ctx.sessionManager.getSessionFile();
+        const sessionFile = ctx.sessionManager.getSessionFile()!;
         const tracker = contextTracker.get(sessionFile);
-        
-        if (tracker && tracker.lastTokenCount > 0 && tracker.charsSinceLastCheck < CHAR_CHECK_THRESHOLD) {
+
+        if (
+            tracker &&
+            tracker.lastTokenCount > 0 &&
+            tracker.charsSinceLastCheck < CHAR_CHECK_THRESHOLD
+        ) {
             // Use cached count - it's still accurate enough
             return;
         }
@@ -253,10 +274,17 @@ export default function (pi: ExtensionAPI) {
         const messages = payload?.messages || [];
 
         try {
-            const tokenCount = await countContextTokens(modelId, messages, apiKey);
-            
+            const tokenCount = await countContextTokens(
+                modelId,
+                messages,
+                apiKey,
+            );
+
             // Update tracker
-            contextTracker.set(sessionFile, { charsSinceLastCheck: 0, lastTokenCount: tokenCount });
+            contextTracker.set(sessionFile, {
+                charsSinceLastCheck: 0,
+                lastTokenCount: tokenCount,
+            });
             console.log(`[Featherless] Context: ${tokenCount} tokens`);
         } catch (err) {
             handleApiError(err);
@@ -270,7 +298,9 @@ export default function (pi: ExtensionAPI) {
             if (cost !== undefined) {
                 concurrency.activeRequests.delete(requestId);
                 concurrency.totalCost -= cost;
-                console.log(`[Featherless] Request ${requestId} released (total: ${concurrency.totalCost}/${concurrency.limit})`);
+                console.log(
+                    `[Featherless] Request ${requestId} released (total: ${concurrency.totalCost}/${concurrency.limit})`,
+                );
                 return true;
             }
         }
@@ -283,7 +313,9 @@ export default function (pi: ExtensionAPI) {
                 if (c === cost) {
                     concurrency.activeRequests.delete(id);
                     concurrency.totalCost -= c;
-                    console.log(`[Featherless] Request ${id} completed (remaining: ${concurrency.totalCost}/${concurrency.limit})`);
+                    console.log(
+                        `[Featherless] Request ${id} completed (remaining: ${concurrency.totalCost}/${concurrency.limit})`,
+                    );
                     return true;
                 }
             }
@@ -298,28 +330,25 @@ export default function (pi: ExtensionAPI) {
 
         releaseConcurrency(model.id);
 
-        const message = event.message;
+        const message = event.message as any;
         const usage = message?.usage;
 
         if (usage) {
             // Track cache statistics
             const cacheRead = usage.cacheRead || 0;
             const cacheWrite = usage.cacheWrite || 0;
-            
+
             if (cacheRead > 0) {
                 cacheStats.hits++;
                 cacheStats.tokensSaved += cacheRead;
             }
             cacheStats.lastCacheRead = cacheRead;
-            
+
             // Log actual token usage from API response
-            const parts = [
-                `${usage.input} input`,
-                `${usage.output} output`,
-            ];
+            const parts = [`${usage.input} input`, `${usage.output} output`];
             if (cacheRead > 0) parts.push(`${cacheRead} cache read`);
             if (cacheWrite > 0) parts.push(`${cacheWrite} cache write`);
-            
+
             console.log(`[Featherless] Token usage: ${parts.join(", ")}`);
         }
     });
@@ -336,10 +365,9 @@ export default function (pi: ExtensionAPI) {
         const apiKey = await getApiKeyFromContext(ctx);
 
         // Get the tool result content to track character delta
-        const result = event.result;
         let charsAdded = 0;
-        if (result?.content) {
-            for (const block of result.content) {
+        if (event.content) {
+            for (const block of event.content) {
                 if (block.type === "text" && block.text) {
                     charsAdded += block.text.length;
                 }
@@ -347,8 +375,11 @@ export default function (pi: ExtensionAPI) {
         }
 
         // Update tracker with character delta
-        const sessionFile = ctx.sessionManager.getSessionFile();
-        const tracker = contextTracker.get(sessionFile) || { charsSinceLastCheck: 0, lastTokenCount: 0 };
+        const sessionFile = ctx.sessionManager.getSessionFile()!;
+        const tracker = contextTracker.get(sessionFile) || {
+            charsSinceLastCheck: 0,
+            lastTokenCount: 0,
+        };
         tracker.charsSinceLastCheck += charsAdded;
         contextTracker.set(sessionFile, tracker);
 
@@ -358,7 +389,8 @@ export default function (pi: ExtensionAPI) {
         }
 
         // Get all messages for accurate count
-        const messages = ctx.sessionManager.getBranch()
+        const messages = ctx.sessionManager
+            .getBranch()
             .filter((e: any) => e.type === "message")
             .map((e: any) => e.message);
 
@@ -366,14 +398,20 @@ export default function (pi: ExtensionAPI) {
 
         // Call API for accurate token count
         try {
-            const tokenCount = await countContextTokens(model.id, messages, apiKey);
+            const tokenCount = await countContextTokens(
+                model.id,
+                messages,
+                apiKey,
+            );
             tracker.lastTokenCount = tokenCount;
-            tracker.charsSinceLastCheck = 0;  // Reset delta
+            tracker.charsSinceLastCheck = 0; // Reset delta
             contextTracker.set(sessionFile, tracker);
 
             // Log context usage
             const percent = ((tokenCount / realContextWindow) * 100).toFixed(0);
-            console.log(`[Featherless] Context: ${tokenCount} / ${realContextWindow} tokens (${percent}%)`);
+            console.log(
+                `[Featherless] Context: ${tokenCount} / ${realContextWindow} tokens (${percent}%)`,
+            );
         } catch (err) {
             handleApiError(err);
             console.warn(`[Featherless] Failed to check context tokens:`, err);
@@ -387,34 +425,50 @@ export default function (pi: ExtensionAPI) {
 
         const preparation = event.preparation;
         const realContextWindow = getRealContextLimit(model.id);
-        
+
         // Log estimated tokens before compaction
-        console.log(`[Featherless] Compaction triggered: ${preparation.tokensBefore} estimated tokens`);
-        
+        console.log(
+            `[Featherless] Compaction triggered: ${preparation.tokensBefore} estimated tokens`,
+        );
+
         // Try to get accurate count
         const apiKey = await getApiKeyFromContext(ctx);
-        const messages = ctx.sessionManager.getBranch()
+        const messages = ctx.sessionManager
+            .getBranch()
             .filter((e: any) => e.type === "message")
             .map((e: any) => e.message);
-        
+
         if (messages.length > 0) {
             try {
-                const accurateCount = await countContextTokens(model.id, messages, apiKey);
-                const percent = realContextWindow ? ((accurateCount / realContextWindow) * 100).toFixed(1) : "?";
-                console.log(`[Featherless] Accurate context: ${accurateCount} tokens (${percent}% of ${realContextWindow || "unknown"})`);
+                const accurateCount = await countContextTokens(
+                    model.id,
+                    messages,
+                    apiKey,
+                );
+                const percent = realContextWindow
+                    ? ((accurateCount / realContextWindow) * 100).toFixed(1)
+                    : "?";
+                console.log(
+                    `[Featherless] Accurate context: ${accurateCount} tokens (${percent}% of ${realContextWindow || "unknown"})`,
+                );
             } catch (err) {
                 handleApiError(err);
-                console.warn(`[Featherless] Failed to get accurate token count:`, err);
+                console.warn(
+                    `[Featherless] Failed to get accurate token count:`,
+                    err,
+                );
             }
         }
     });
-    
+
     // Log compaction completion
     pi.on("session_compact", async (event, ctx) => {
         const model = ctx.model;
         if (model?.provider !== PROVIDER) return;
-        
-        console.log(`[Featherless] Compaction complete (from extension: ${event.fromExtension})`);
+
+        console.log(
+            `[Featherless] Compaction complete (from extension: ${event.fromExtension})`,
+        );
     });
 
     // Custom High-Fidelity Compaction
@@ -423,10 +477,16 @@ export default function (pi: ExtensionAPI) {
         if (!model || model.provider !== PROVIDER) return;
 
         const { preparation, signal } = event;
-        const { messagesToSummarize, turnPrefixMessages, tokensBefore, firstKeptEntryId, previousSummary } = preparation;
+        const {
+            messagesToSummarize,
+            turnPrefixMessages,
+            tokensBefore,
+            firstKeptEntryId,
+            previousSummary,
+        } = preparation;
 
         // Ensure we always have a reserve tokens value
-        const reserveTokens = 16384; 
+        const reserveTokens = 16384;
         const maxSummaryTokens = Math.floor(0.8 * reserveTokens);
 
         // We'll use the current model for summarization as well, unless it's too small
@@ -435,31 +495,20 @@ export default function (pi: ExtensionAPI) {
         const apiKey = await getApiKeyFromContext(ctx);
         if (!apiKey) return;
 
-        console.log(`[Featherless] High-fidelity compaction: ${formatTokenCount(tokensBefore)} tokens...`);
+        console.log(
+            `[Featherless] High-fidelity compaction: ${formatTokenCount(tokensBefore)} tokens...`,
+        );
 
         // Combine for summary
         const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
-        const conversationText = serializeConversation(convertToLlm(allMessages));
-        const previousContext = previousSummary ? `\n\nPrevious session summary for context:\n${previousSummary}` : "";
+        const conversationText = serializeConversation(
+            convertToLlm(allMessages),
+        );
+        const previousContext = previousSummary
+            ? `\n\nPrevious session summary for context:\n${previousSummary}`
+            : "";
 
-        const summaryPrompt = `You are a technical context summarizer. Create a HIGH-FIDELITY structured summary of this conversation for another LLM to continue the work without losing track of details.
-
-RULES:
-1. Preserve ALL exact file paths, function names, and specific error messages.
-2. List all files currently in the conversation's "active set" (files that were read or modified).
-3. Record the CURRENT STATE of the work: what was just attempted, what succeeded, and what failed.
-4. Capture KEY DECISIONS and their rationale.
-5. Identify the next 3-5 concrete steps.
-
-${previousContext}
-
-<conversation>
-${conversationText}
-</conversation>
-
-Use Markdown with clear headers (Goals, Active Files, Progress, Key Decisions, Next Steps).`;
-
-        const messages = [
+        const messages: Context["messages"] = [
             {
                 role: "user" as const,
                 content: [{ type: "text" as const, text: summaryPrompt }],
@@ -471,7 +520,7 @@ Use Markdown with clear headers (Goals, Active Files, Progress, Key Decisions, N
             const response = await completeSimple(
                 summarizerModel as Model<any>,
                 { messages },
-                { apiKey, maxTokens: maxSummaryTokens, signal }
+                { apiKey, maxTokens: maxSummaryTokens, signal },
             );
 
             const summary = response.content
@@ -482,17 +531,22 @@ Use Markdown with clear headers (Goals, Active Files, Progress, Key Decisions, N
             if (!summary.trim()) return;
 
             // Log successful high-fidelity compaction
-            console.log(`[Featherless] High-fidelity summary generated (${summary.length} chars)`);
+            console.log(
+                `[Featherless] High-fidelity summary generated (${summary.length} chars)`,
+            );
 
             return {
                 compaction: {
                     summary,
                     firstKeptEntryId,
                     tokensBefore,
-                }
+                },
             } as SessionBeforeCompactResult;
         } catch (err) {
-            console.error("[Featherless] High-fidelity compaction failed:", err);
+            console.error(
+                "[Featherless] High-fidelity compaction failed:",
+                err,
+            );
             return; // Fall back to default
         }
     });
