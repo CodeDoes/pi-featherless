@@ -21,6 +21,7 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
     "minimax-m2": { context_limit: 32768, concurrency_use: 4 },
     "minimax-m21": { context_limit: 32768, concurrency_use: 4 },
     "minimax-m25": { context_limit: 32768, concurrency_use: 4 },
+    "qrwkv-72b-32k": { context_limit: 32768, concurrency_use: 1 },
 };
 
 export interface ModelEntry {
@@ -34,11 +35,16 @@ export interface ModelEntry {
  * The models we actually expose. Add/remove here.
  */
 export const MODELS: ModelEntry[] = [
-    // GLM — good tool use
-    { id: "zai-org/GLM-Z1-32B-0414", model_class: "glm4-32b", reasoning: true, tool_use: true },
+    // GLM — 5/5 bench, native tool_calls
+    { id: "zai-org/GLM-4.7-Flash", model_class: "glm47-flash", tool_use: true },
+    { id: "zai-org/GLM-4.7", model_class: "glm47-357b", tool_use: true },
+    { id: "zai-org/GLM-5", model_class: "glm5-754b", tool_use: true },
 
-    // MiniMax — good tool use
+    // MiniMax — 5/5 bench, native tool_calls
     { id: "MiniMaxAI/MiniMax-M2.5", model_class: "minimax-m25", tool_use: true },
+
+    // QRWKV — cc:1, needs fine-tune for reliable tool calling
+    { id: "featherless-ai/QRWKV-72B", model_class: "qrwkv-72b-32k" },
 
 ];
 

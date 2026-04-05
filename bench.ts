@@ -63,9 +63,47 @@ interface BenchModel {
     cc: number;
     thinking: boolean;
     family: string;
+    tagBased?: boolean;
 }
 
+// Few-shot priming for RWKV / state-space models.
+// Full think → tool → result → talk loops to prime the recurrent state.
+// These are "vague memories" of past interactions.
+const TAG_FEW_SHOT: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: "system", content: "You are a helpful assistant. You have access to tools: bash, read_file, write_file. To use a tool, wrap your call in [tool_call] tags. Think briefly before acting." },
+
+    // Memory 1: simple command
+    { role: "user", content: "Can you check who I'm logged in as?" },
+    { role: "assistant", content: "Let me check that for you.\n\n[tool_call]\n{\"name\": \"bash\", \"arguments\": {\"command\": \"whoami\"}}\n[/tool_call]" },
+    { role: "user", content: "[tool result: kit]" },
+    { role: "assistant", content: "You're logged in as `kit`." },
+
+    // Memory 2: read a file
+    { role: "user", content: "What's in /etc/hostname?" },
+    { role: "assistant", content: "I'll read that file.\n\n[tool_call]\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"/etc/hostname\"}}\n[/tool_call]" },
+    { role: "user", content: "[tool result: dev-machine]" },
+    { role: "assistant", content: "Your hostname is `dev-machine`." },
+
+    // Memory 3: write a file with tricky content
+    { role: "user", content: "Save {\"name\": \"test\", \"value\": 42} to data.json" },
+    { role: "assistant", content: "Sure, I'll write that.\n\n[tool_call]\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"data.json\", \"content\": \"{\\\"name\\\": \\\"test\\\", \\\"value\\\": 42}\"}}\n[/tool_call]" },
+    { role: "user", content: "[tool result: ok]" },
+    { role: "assistant", content: "Done, `data.json` has been written." },
+
+    // Memory 4: piped command
+    { role: "user", content: "How many files are in /var/log?" },
+    { role: "assistant", content: "Let me count them.\n\n[tool_call]\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls /var/log | wc -l\"}}\n[/tool_call]" },
+    { role: "user", content: "[tool result: 23]" },
+    { role: "assistant", content: "There are 23 files in `/var/log`." },
+
+    // Memory 5: no tool needed
+    { role: "user", content: "What's the capital of France?" },
+    { role: "assistant", content: "Paris." },
+];
+
 const BENCH_MODELS: BenchModel[] = [
+    // QRWKV
+    { id: "featherless-ai/QRWKV-72B", short: "QRWKV 72B", cc: 1, thinking: false, family: "qrwkv", tagBased: true },
     // GLM
     { id: "zai-org/GLM-Z1-32B-0414", short: "GLM-Z1 32B", cc: 2, thinking: true, family: "glm" },
     { id: "zai-org/GLM-4.7-Flash", short: "GLM-4.7 Flash", cc: 2, thinking: false, family: "glm" },
@@ -197,15 +235,36 @@ function parseToolCallTags(content: string): {
 } {
     const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
     const tagPatterns = [
+        // closed tags — angle brackets
         /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g,
         /<function-call>\s*([\s\S]*?)\s*<\/function-call>/g,
+        // closed tags — square brackets (survives chat templates)
+        /\[tool_call\]\s*([\s\S]*?)\s*\[\/tool_call\]/g,
+        /\[function-call\]\s*([\s\S]*?)\s*\[\/function-call\]/g,
+        // unclosed tags (either style)
+        /<tool_call>\s*([\s\S]*)/g,
+        /\[tool_call\]\s*([\s\S]*)/g,
     ];
     let textBefore = content;
     for (const re of tagPatterns) {
         let match;
         while ((match = re.exec(content)) !== null) {
             try {
-                const parsed = JSON.parse(match[1]);
+                let raw = match[1].trim();
+                // Try to repair truncated JSON (e.g. missing closing braces)
+                let parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch {
+                    // Count unmatched braces and close them
+                    let depth = 0;
+                    for (const ch of raw) {
+                        if (ch === '{') depth++;
+                        else if (ch === '}') depth--;
+                    }
+                    if (depth > 0) raw += '}'.repeat(depth);
+                    parsed = JSON.parse(raw);
+                }
                 toolCalls.push({
                     name: parsed.name,
                     arguments: parsed.arguments ?? parsed.parameters ?? {},
@@ -239,17 +298,18 @@ async function runOne(model: BenchModel, color: string, scenario: Scenario): Pro
     const start = Date.now();
 
     try {
+        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = model.tagBased
+            ? [...TAG_FEW_SHOT, { role: "user", content: scenario.prompt }]
+            : [{ role: "system", content: "You are a helpful assistant with tool access. Be concise." }, { role: "user", content: scenario.prompt }];
         const params: any = {
             model: model.id,
-            messages: [
-                { role: "system", content: "You are a helpful assistant with tool access. Be concise." },
-                { role: "user", content: scenario.prompt },
-            ],
-            tools: scenario.tools,
+            messages,
             max_tokens: 512,
             stream: true,
             stream_options: { include_usage: true },
         };
+        // Tag-based models get tool format via system prompt, not OpenAI tools param
+        if (!model.tagBased) params.tools = scenario.tools;
         if (model.thinking) params.enable_thinking = true;
 
         const stream = await client.chat.completions.create(params);
