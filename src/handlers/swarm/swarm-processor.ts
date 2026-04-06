@@ -1,5 +1,7 @@
 import { readFileSync } from "fs";
 import { completeSimple } from "@mariozechner/pi-ai";
+import { semaphore } from "../concurrency";
+import { SwarmPanel } from "./swarm-panel";
 import { SwarmLogger } from "./swarm-logger";
 import { SwarmConfig, SwarmFileResult } from "./swarm-types";
 
@@ -99,18 +101,17 @@ export class SwarmProcessor {
         const startTime = Date.now();
         const onUpdate = options.onUpdate || (() => {}); // Ensure onUpdate is always defined
 
-        // Process files sequentially for now (will add parallelism next)
-        for (let i = 0; i < filePaths.length; i++) {
-            const filePath = filePaths[i];
-            const instruction =
-                instructions[i] || "Analyze this file and provide key insights";
+        // Process files in parallel using semaphore for concurrency control
+        const run = semaphore(this.config.concurrency);
+        const filePromises = filePaths.map((filePath, i) =>
+            run(async () => {
+                const instruction = instructions[i] || "Analyze this file and provide key insights";
+                return this.processFile(filePath, instruction, options);
+            })
+        );
 
-            const result = await this.processFile(
-                filePath,
-                instruction,
-                options,
-            );
-            results.push(result);
+        const fileResults = await Promise.all(filePromises);
+        results.push(...fileResults);
 
             // Update progress
             if (onUpdate) {
