@@ -11,29 +11,40 @@ import {
     type Component,
     visibleWidth,
     truncateToWidth,
-} from "../../pi-mono/packages/tui/dist/index.js";
+} from "@mariozechner/pi-tui";
 
 // ─── colours ──────────────────────────────────────────────────────────────────
 
-const R    = "\x1b[0m";
+const R = "\x1b[0m";
 const bold = (s: string) => `\x1b[1m${s}${R}`;
-const dim  = (s: string) => `\x1b[2m${s}${R}`;
+const dim = (s: string) => `\x1b[2m${s}${R}`;
 const gray = (s: string) => `\x1b[90m${s}${R}`;
 const botCol = (i: number, s: string) => {
     return [`\x1b[36m`, `\x1b[33m`, `\x1b[35m`, `\x1b[32m`][i % 4] + s + R;
 };
 
 // Background colour fills — dark per-bot hues + dim gray for empty portion
-const BOT_BG   = ["\x1b[48;5;23m", "\x1b[48;5;130m", "\x1b[48;5;53m", "\x1b[48;5;22m"];
+const BOT_BG = [
+    "\x1b[48;5;23m",
+    "\x1b[48;5;130m",
+    "\x1b[48;5;53m",
+    "\x1b[48;5;22m",
+];
 const EMPTY_BG = "\x1b[48;5;236m";
-const OVERALL_FILL_BG  = "\x1b[48;5;18m";
+const OVERALL_FILL_BG = "\x1b[48;5;18m";
 const OVERALL_EMPTY_BG = "\x1b[48;5;234m";
 const WHITE_FG = "\x1b[97m";
 
 /** Render a full-width background progress bar with plain text overlaid. */
-function bgBar(plainText: string, width: number, pct: number, fillBg: string, emptyBg: string): string {
-    const padded   = plainText.padEnd(width).slice(0, width);
-    const filledW  = Math.round((pct / 100) * width);
+function bgBar(
+    plainText: string,
+    width: number,
+    pct: number,
+    fillBg: string,
+    emptyBg: string,
+): string {
+    const padded = plainText.padEnd(width).slice(0, width);
+    const filledW = Math.round((pct / 100) * width);
     return `${fillBg}${WHITE_FG}${padded.slice(0, filledW)}${R}${emptyBg}${WHITE_FG}${padded.slice(filledW)}${R}`;
 }
 
@@ -41,26 +52,32 @@ function bgBar(plainText: string, width: number, pct: number, fillBg: string, em
 
 class Lines implements Component {
     lines: string[] = [];
-    add(line: string) { this.lines.push(line); }
-    render(w: number): string[] { return this.lines.map(l => truncateToWidth(l, w)); }
+    add(line: string) {
+        this.lines.push(line);
+    }
+    render(w: number): string[] {
+        return this.lines.map((l) => truncateToWidth(l, w));
+    }
     invalidate() {}
 }
-
 
 // ─── SwarmPanel — compact single-line-per-bot + collective bar ───────────────
 
 interface BotState {
     fileIdx: number | null;
     file: string | null;
-    progress: number;          // 0–100
-    snippet: string;           // short response text shown inline
+    progress: number; // 0–100
+    snippet: string; // short response text shown inline
     status: "idle" | "reading" | "done";
 }
 
 class SwarmPanel implements Component {
-    bots: BotState[] = [0,1,2,3].map(() => ({
-        fileIdx: null, file: null, progress: 0,
-        snippet: "", status: "idle" as const,
+    bots: BotState[] = [0, 1, 2, 3].map(() => ({
+        fileIdx: null,
+        file: null,
+        progress: 0,
+        snippet: "",
+        status: "idle" as const,
     }));
     filesCompleted = 0;
 
@@ -70,23 +87,40 @@ class SwarmPanel implements Component {
         const lines: string[] = [];
 
         // ── collective bar ───────────────────────────────────────────────────
-        const overallPct = Math.round((this.filesCompleted / this.totalFiles) * 100);
+        const overallPct = Math.round(
+            (this.filesCompleted / this.totalFiles) * 100,
+        );
         const overallLabel = `  ◈ overall  ${this.filesCompleted}/${this.totalFiles} files  ${overallPct}%`;
-        lines.push(bgBar(overallLabel, w, overallPct, OVERALL_FILL_BG, OVERALL_EMPTY_BG));
+        lines.push(
+            bgBar(
+                overallLabel,
+                w,
+                overallPct,
+                OVERALL_FILL_BG,
+                OVERALL_EMPTY_BG,
+            ),
+        );
         lines.push("");
 
         // ── one line per bot ─────────────────────────────────────────────────
         for (let i = 0; i < 4; i++) {
             const b = this.bots[i];
-            const pctStr = b.status !== "idle" ? `  ${String(b.progress).padStart(3)}%` : "";
-            const tag    = b.fileIdx !== null ? ` [${b.fileIdx}]` : "";
-            const label  = `  sbot-${i}${tag}`;
-            const file   = b.file ? `  ${b.file}` : "";
-            const snip   = b.snippet ? `  ${b.snippet}` : (b.status === "idle" ? "  idle" : "");
+            const pctStr =
+                b.status !== "idle"
+                    ? `  ${String(b.progress).padStart(3)}%`
+                    : "";
+            const tag = b.fileIdx !== null ? ` [${b.fileIdx}]` : "";
+            const label = `  sbot-${i}${tag}`;
+            const file = b.file ? `  ${b.file}` : "";
+            const snip = b.snippet
+                ? `  ${b.snippet}`
+                : b.status === "idle"
+                  ? "  idle"
+                  : "";
             // build plain text: name + file + snippet (truncated), pct right-aligned
             const rightW = pctStr.length;
             const leftMax = w - rightW;
-            let left = (label + file + snip);
+            let left = label + file + snip;
             if (left.length > leftMax) left = left.slice(0, leftMax);
             const plain = left.padEnd(leftMax) + pctStr;
             lines.push(bgBar(plain, w, b.progress, BOT_BG[i], EMPTY_BG));
@@ -109,53 +143,53 @@ const FILES = [
             'import { registerConcurrencyTracking } from "./handlers/concurrency";',
             'import { registerContextTracking }  from "./handlers/context";',
             'import { registerCompaction }       from "./handlers/compaction";',
-            '',
-            'export default function(pi: ExtensionAPI) {',
-            '    registerProvider(pi);',
-            '    registerConcurrencyTracking(pi);',
-            '    registerContextTracking(pi);',
-            '    registerCompaction(pi);',
-            '}',
+            "",
+            "export default function(pi: ExtensionAPI) {",
+            "    registerProvider(pi);",
+            "    registerConcurrencyTracking(pi);",
+            "    registerContextTracking(pi);",
+            "    registerCompaction(pi);",
+            "}",
         ],
         resp: "Main entry point. Wires up four handler modules: provider, concurrency, context, and compaction.",
     },
     {
         name: "models.ts",
         content: [
-            'const SAFETY_FACTOR = 0.75;',
-            'const MODEL_CLASSES: Record<string, ModelClass> = {',
+            "const SAFETY_FACTOR = 0.75;",
+            "const MODEL_CLASSES: Record<string, ModelClass> = {",
             '    "glm47-flash": { context_limit: 32768, concurrency_use: 2 },',
             '    "kimi-k2":     { context_limit: 32768, concurrency_use: 4 },',
             '    "deepseek-v3.2": { context_limit: 32768, concurrency_use: 4 },',
             '    "qwen3-32b":   { context_limit: 32768, concurrency_use: 2 },',
             '    "qwen3-235b":  { context_limit: 32768, concurrency_use: 4 },',
-            '};',
-            'export function getModelConfig(entry: ModelEntry) {',
-            '    const safe = Math.floor(mc.context_limit * SAFETY_FACTOR);',
-            '    return { id: entry.id, contextWindow: safe, ... };',
-            '}',
+            "};",
+            "export function getModelConfig(entry: ModelEntry) {",
+            "    const safe = Math.floor(mc.context_limit * SAFETY_FACTOR);",
+            "    return { id: entry.id, contextWindow: safe, ... };",
+            "}",
         ],
         resp: "Defines 14 model configs across 8 classes. 0.75 safety factor shrinks the reported window to prevent chars/4 overflow.",
     },
     {
         name: "tokenize.ts",
         content: [
-            'const tokenCache = new Map<string, number>();',
-            '',
-            'export async function tokenize(',
-            '    model: string, text: string, apiKey?: string',
-            '): Promise<number> {',
-            '    const key = `${model}:${simpleHash(text)}`;',
-            '    if (tokenCache.has(key)) return tokenCache.get(key)!;',
-            '    const res = await fetch(`${BASE_URL}/tokenize`, {',
+            "const tokenCache = new Map<string, number>();",
+            "",
+            "export async function tokenize(",
+            "    model: string, text: string, apiKey?: string",
+            "): Promise<number> {",
+            "    const key = `${model}:${simpleHash(text)}`;",
+            "    if (tokenCache.has(key)) return tokenCache.get(key)!;",
+            "    const res = await fetch(`${BASE_URL}/tokenize`, {",
             '        method: "POST",',
-            '        body: JSON.stringify({ model, prompt: text }),',
-            '        headers: { Authorization: `Bearer ${apiKey}` },',
-            '    });',
-            '    const count = (await res.json()).tokens;',
-            '    tokenCache.set(key, count);',
-            '    return count;',
-            '}',
+            "        body: JSON.stringify({ model, prompt: text }),",
+            "        headers: { Authorization: `Bearer ${apiKey}` },",
+            "    });",
+            "    const count = (await res.json()).tokens;",
+            "    tokenCache.set(key, count);",
+            "    return count;",
+            "}",
         ],
         resp: "Calls /v1/tokenize for accurate counts. LRU cache on (model, text_hash) avoids redundant API calls.",
     },
@@ -164,81 +198,81 @@ const FILES = [
         content: [
             'export const BASE_URL = "https://api.featherless.ai/v1";',
             'export const PROVIDER = "featherless-ai";',
-            '',
-            'export async function getApiKey(ctx: any): Promise<string | undefined> {',
-            '    if (ctx.modelRegistry) {',
-            '        const key = await ctx.modelRegistry',
-            '            .getApiKeyForProvider(PROVIDER);',
-            '        if (key) return key;',
-            '    }',
-            '    return process.env.FEATHERLESS_API_KEY;',
-            '}',
+            "",
+            "export async function getApiKey(ctx: any): Promise<string | undefined> {",
+            "    if (ctx.modelRegistry) {",
+            "        const key = await ctx.modelRegistry",
+            "            .getApiKeyForProvider(PROVIDER);",
+            "        if (key) return key;",
+            "    }",
+            "    return process.env.FEATHERLESS_API_KEY;",
+            "}",
         ],
         resp: "Shared constants and getApiKey() — checks modelRegistry first, falls back to env var.",
     },
     {
         name: "handlers/provider.ts",
         content: [
-            'export function registerProvider(pi: ExtensionAPI) {',
-            '    pi.registerProvider(PROVIDER, {',
-            '        baseUrl: BASE_URL,',
+            "export function registerProvider(pi: ExtensionAPI) {",
+            "    pi.registerProvider(PROVIDER, {",
+            "        baseUrl: BASE_URL,",
             '        api: "openai-completions",',
-            '        models: MODELS.map(getModelConfig),',
-            '        oauth: {',
+            "        models: MODELS.map(getModelConfig),",
+            "        oauth: {",
             '            name: "Featherless AI",',
-            '            async login(callbacks) {',
+            "            async login(callbacks) {",
             '                callbacks.onAuth({ url: "featherless.ai/account/api-keys" });',
             '                const key = await callbacks.onPrompt({ message: "Paste key:" });',
-            '                return { access: key, expires: 60*60*24*360 };',
-            '            },',
-            '        },',
-            '    });',
-            '}',
+            "                return { access: key, expires: 60*60*24*360 };",
+            "            },",
+            "        },",
+            "    });",
+            "}",
         ],
         resp: "Registers the featherless-ai provider with OAuth. Redirects to API keys page and prompts for key.",
     },
     {
         name: "handlers/concurrency.ts",
         content: [
-            'const state = {',
-            '    activeRequests: new Map<string, number>(),',
-            '    totalCost: 0,',
-            '    limit: 4,',
-            '};',
-            '',
-            'export function registerConcurrencyTracking(pi: ExtensionAPI) {',
+            "const state = {",
+            "    activeRequests: new Map<string, number>(),",
+            "    totalCost: 0,",
+            "    limit: 4,",
+            "};",
+            "",
+            "export function registerConcurrencyTracking(pi: ExtensionAPI) {",
             '    pi.on("before_provider_request", async (event, ctx) => {',
-            '        const cost = getConcurrencyUse(modelClass);',
-            '        state.activeRequests.set(requestId, cost);',
-            '        state.totalCost += cost;',
-            '    });',
+            "        const cost = getConcurrencyUse(modelClass);",
+            "        state.activeRequests.set(requestId, cost);",
+            "        state.totalCost += cost;",
+            "    });",
             '    pi.on("turn_end", async (_e, ctx) => {',
-            '        release(ctx.model.id);',
-            '    });',
-            '}',
+            "        release(ctx.model.id);",
+            "    });",
+            "}",
         ],
         resp: "Tracks in-flight request costs. Parses 429s to auto-calibrate limit. Releases on turn_end.",
     },
     {
         name: "handlers/compaction.ts",
         content: [
-            'const MAX_SUMMARY_TOKENS = Math.floor(0.8 * 16384); // 13107',
-            '',
-            'export function registerCompaction(pi: ExtensionAPI) {',
+            "const MAX_SUMMARY_TOKENS = Math.floor(0.8 * 16384); // 13107",
+            "",
+            "export function registerCompaction(pi: ExtensionAPI) {",
             '    pi.on("session_before_compact", async (event, ctx) => {',
-            '        const { messagesToSummarize, turnPrefixMessages,',
-            '                firstKeptEntryId, previousSummary } = event.preparation;',
-            '        const convText = serializeConversation(',
-            '            convertToLlm([...messagesToSummarize, ...turnPrefixMessages])',
-            '        );',
-            '        const prevCtx = previousSummary',
+            "        const { messagesToSummarize, turnPrefixMessages,",
+            "                firstKeptEntryId, previousSummary } = event.preparation;",
+            "        const convText = serializeConversation(",
+            "            convertToLlm([...messagesToSummarize, ...turnPrefixMessages])",
+            "        );",
+            "        const prevCtx = previousSummary",
             '            ? `\\n\\nPrevious summary:\\n${previousSummary}` : "";',
-            '        const response = await completeSimple(model, {',
+            "        const response = await completeSimple(model, {",
             '            messages: [{ role: "user", content:',
             '                [{ type: "text", text: summaryPrompt + prevCtx + convText }]',
-            '            }]}, { apiKey, maxTokens: MAX_SUMMARY_TOKENS });',
-            '    });',
-            '}',
+            "            }]}, { apiKey, maxTokens: MAX_SUMMARY_TOKENS });",
+            "    });",
+            "}",
         ],
         resp: "Custom high-fidelity compaction. Injects previous summary as context, caps output at 80% of 16k reserve.",
     },
@@ -250,8 +284,8 @@ async function main() {
     const terminal = new ProcessTerminal();
     const tui = new TUI(terminal);
 
-    const preChat  = new Lines();
-    const panel    = new SwarmPanel(FILES.length);
+    const preChat = new Lines();
+    const panel = new SwarmPanel(FILES.length);
     const postChat = new Lines();
 
     tui.addChild(preChat);
@@ -276,14 +310,24 @@ async function main() {
     // ── scene 1: user asks ────────────────────────────────────────────────────
     preChat.add("");
     preChat.add(gray("┌ user"));
-    await type(preChat, gray("│ ") + "\x1b[97m", "What does this codebase do and how is it structured?", 22);
+    await type(
+        preChat,
+        gray("│ ") + "\x1b[97m",
+        "What does this codebase do and how is it structured?",
+        22,
+    );
     preChat.add(gray("└"));
     preChat.add("");
     await sleep(400);
 
     // ── scene 2: bot-0 wakes up ───────────────────────────────────────────────
     preChat.add(botCol(0, bold("┌ bot-0")));
-    await type(preChat, botCol(0, "│ "), "Just woke up. Let me get my bearings.", 20);
+    await type(
+        preChat,
+        botCol(0, "│ "),
+        "Just woke up. Let me get my bearings.",
+        20,
+    );
     await sleep(300);
     preChat.add(botCol(0, "│ ") + dim("$ ls"));
     R_();
@@ -298,7 +342,12 @@ async function main() {
         await sleep(70);
     }
     await sleep(300);
-    await type(preChat, botCol(0, "│ "), "Seven source files. I'll read them all at once — launching a swarm.", 18);
+    await type(
+        preChat,
+        botCol(0, "│ "),
+        "Seven source files. I'll read them all at once — launching a swarm.",
+        18,
+    );
     preChat.add(botCol(0, "└"));
     preChat.add("");
     R_();
@@ -313,12 +362,15 @@ async function main() {
 
     let fileQueue = 4;
 
-    function addFileSummary(f: typeof FILES[number]) {
+    function addFileSummary(f: (typeof FILES)[number]) {
         postChat.add(bold(f.name));
         const words = f.resp.split(" ");
         let line = "  ";
         for (const word of words) {
-            if (visibleWidth(line) + word.length + 1 > terminal.columns - 2 && line.trim()) {
+            if (
+                visibleWidth(line) + word.length + 1 > terminal.columns - 2 &&
+                line.trim()
+            ) {
                 postChat.add(dim(line));
                 line = "  " + word + " ";
             } else line += word + " ";
@@ -328,7 +380,11 @@ async function main() {
         R_();
     }
 
-    async function runBot(botIdx: number, globalIdx: number, file: typeof FILES[number]) {
+    async function runBot(
+        botIdx: number,
+        globalIdx: number,
+        file: (typeof FILES)[number],
+    ) {
         const b = panel.bots[botIdx];
         b.fileIdx = globalIdx;
         b.file = file.name;
@@ -377,10 +433,22 @@ async function main() {
 
     // Kick off 4 bots with slight stagger
     await Promise.all([
-        (async () => { await sleep(0);  await runBot(0, 0, FILES[0]); })(),
-        (async () => { await sleep(40); await runBot(1, 1, FILES[1]); })(),
-        (async () => { await sleep(20); await runBot(2, 2, FILES[2]); })(),
-        (async () => { await sleep(55); await runBot(3, 3, FILES[3]); })(),
+        (async () => {
+            await sleep(0);
+            await runBot(0, 0, FILES[0]);
+        })(),
+        (async () => {
+            await sleep(40);
+            await runBot(1, 1, FILES[1]);
+        })(),
+        (async () => {
+            await sleep(20);
+            await runBot(2, 2, FILES[2]);
+        })(),
+        (async () => {
+            await sleep(55);
+            await runBot(3, 3, FILES[3]);
+        })(),
     ]);
 
     await sleep(300);
@@ -405,4 +473,7 @@ async function main() {
     tui.stop();
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
