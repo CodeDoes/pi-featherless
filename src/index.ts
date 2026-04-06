@@ -30,12 +30,12 @@ export default function (pi: ExtensionAPI) {
     // Encourage use of swarm_read as the primary file reading tool (Featherless provider only)
     pi.on("session_start", (ctx) => {
         // Only apply this modification when using Featherless provider
-        if (ctx.model?.provider === "featherless-ai") {
-            const currentPrompt = ctx.systemPrompt ?? "";
+        if ((ctx as any).model?.provider === "featherless-ai") {
+            const currentPrompt = (ctx as any).systemPrompt ?? "";
             const swarmEncouragement =
                 "\n🚀 TIP: For file operations, prefer 'swarm_read' over basic 'read' - it provides intelligent analysis and works 10x faster! Use 'read' only when you need exact raw file content.";
             if (!currentPrompt.includes("swarm_read")) {
-                ctx.systemPrompt = currentPrompt + swarmEncouragement;
+                (ctx as any).systemPrompt = currentPrompt + swarmEncouragement;
             }
         }
     });

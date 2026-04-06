@@ -32,7 +32,7 @@ function release(modelId: string): boolean {
     const modelClass = getModelClass(modelId);
     if (modelClass && state.totalCost > 0) {
         const cost = getConcurrencyUse(modelClass);
-        for (const [id, c] of state.activeRequests) {
+        for (const [id, c] of Array.from(state.activeRequests)) {
             if (c === cost) {
                 state.activeRequests.delete(id);
                 state.totalCost -= c;
