@@ -97,6 +97,7 @@ export class SwarmProcessor {
 
         const results: SwarmFileResult[] = [];
         const startTime = Date.now();
+        const onUpdate = options.onUpdate || (() => {}); // Ensure onUpdate is always defined
 
         // Process files sequentially for now (will add parallelism next)
         for (let i = 0; i < filePaths.length; i++) {
