@@ -19,13 +19,14 @@ export class SwarmProcessor {
     async processFile(
         filePath: string,
         instruction: string,
-        options: SwarmProcessingOptions
+        options: SwarmProcessingOptions,
     ): Promise<SwarmFileResult> {
-        const { model, apiKey, signal, onUpdate } = options;
+        const { model, apiKey, signal } = options;
+        const onUpdate = options.onUpdate || (() => {}); // Ensure onUpdate is always a function
         const result: SwarmFileResult = { filePath, content: "" };
 
         try {
-            SwarmLogger.fileProcessing(options.ctx, filePath, 'start');
+            SwarmLogger.fileProcessing(options.ctx, filePath, "start");
 
             // Read file
             const fileContent = readFileSync(filePath, "utf8");
@@ -34,39 +35,52 @@ export class SwarmProcessor {
             if (model && apiKey) {
                 SwarmLogger.llmCall(options.ctx, filePath, instruction);
 
-                const prompt = this.createPrompt(filePath, fileContent, instruction);
-                result.content = await this.callLLM(model, apiKey, prompt, signal);
+                const prompt = this.createPrompt(
+                    filePath,
+                    fileContent,
+                    instruction,
+                );
+                result.content = await this.callLLM(
+                    model,
+                    apiKey,
+                    prompt,
+                    signal,
+                );
             } else {
                 // Return raw content if no model
                 result.content = fileContent;
             }
 
-            SwarmLogger.fileProcessing(options.ctx, filePath, 'success');
+            SwarmLogger.fileProcessing(options.ctx, filePath, "success");
             return result;
-
         } catch (error) {
-            result.error = error instanceof Error ? error : new Error(String(error));
-            SwarmLogger.fileProcessing(options.ctx, filePath, 'error');
+            result.error =
+                error instanceof Error ? error : new Error(String(error));
+            SwarmLogger.fileProcessing(options.ctx, filePath, "error");
             return result;
         }
     }
 
-    private createPrompt(filePath: string, fileContent: string, instruction: string): string {
+    private createPrompt(
+        filePath: string,
+        fileContent: string,
+        instruction: string,
+    ): string {
         const contentPreview = fileContent.slice(0, this.config.maxFileChars);
         return `File: ${filePath}\n\n\`\`\`\n${contentPreview}\n\`\`\`\n\n${instruction}`;
     }
 
-    private async callLLM(model: any, apiKey: string, prompt: string, signal: AbortSignal): Promise<string> {
-        const result = await completeSimple(
-            model,
-            apiKey,
-            prompt,
-            {
-                signal,
-                temperature: 0.1,
-                max_tokens: 2048,
-            }
-        );
+    private async callLLM(
+        model: any,
+        apiKey: string,
+        prompt: string,
+        signal: AbortSignal,
+    ): Promise<string> {
+        const result = await completeSimple(model, apiKey, prompt, {
+            signal,
+            temperature: 0.1,
+            max_tokens: 2048,
+        });
         return this.stripCodeFence(result);
     }
 
@@ -77,7 +91,7 @@ export class SwarmProcessor {
     async processFiles(
         filePaths: string[],
         instructions: string[],
-        options: SwarmProcessingOptions
+        options: SwarmProcessingOptions,
     ): Promise<SwarmFileResult[]> {
         SwarmLogger.startOperation(options.ctx, filePaths);
 
@@ -87,18 +101,25 @@ export class SwarmProcessor {
         // Process files sequentially for now (will add parallelism next)
         for (let i = 0; i < filePaths.length; i++) {
             const filePath = filePaths[i];
-            const instruction = instructions[i] || "Analyze this file and provide key insights";
+            const instruction =
+                instructions[i] || "Analyze this file and provide key insights";
 
-            const result = await this.processFile(filePath, instruction, options);
+            const result = await this.processFile(
+                filePath,
+                instruction,
+                options,
+            );
             results.push(result);
 
             // Update progress
             if (onUpdate) {
                 onUpdate({
-                    content: [{
-                        type: "text",
-                        text: `### ${filePath}\n${result.content.slice(0, 200)}`,
-                    }],
+                    content: [
+                        {
+                            type: "text",
+                            text: `### ${filePath}\n${result.content.slice(0, 200)}`,
+                        },
+                    ],
                     details: {
                         completed: i + 1,
                         total: filePaths.length,
