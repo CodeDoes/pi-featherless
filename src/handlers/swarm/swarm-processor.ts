@@ -11,6 +11,15 @@ const DEFAULT_CONFIG: SwarmConfig = {
     timeoutMs: 20_000,
 };
 
+interface SwarmProcessingOptions {
+    model: any;
+    apiKey: string;
+    signal: AbortSignal;
+    ctx: any;
+    onUpdate?: (update: any) => void;
+    preReadContent?: string;
+}
+
 export class SwarmProcessor {
     private config: SwarmConfig;
 
@@ -173,12 +182,4 @@ export class SwarmProcessor {
 
         return results;
     }
-}
-
-interface SwarmProcessingOptions {
-    model: any;
-    apiKey: string;
-    signal: AbortSignal;
-    ctx: any;
-    onUpdate?: (update: any) => void;
 }
