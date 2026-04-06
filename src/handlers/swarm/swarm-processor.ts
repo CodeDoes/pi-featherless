@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { completeSimple } from "@mariozechner/pi-ai";
 
-import { SwarmPanel, semaphore } from "./swarm-panel";
+import { SwarmPanel, semaphore } from "../swarm-panel";
 import { SwarmLogger } from "./swarm-logger";
 import { SwarmConfig, SwarmFileResult } from "./swarm-types";
 
@@ -13,7 +13,7 @@ const DEFAULT_CONFIG: SwarmConfig = {
 
 interface SwarmProcessingOptions {
     model: any;
-    apiKey: string;
+    context: any;
     signal: AbortSignal;
     ctx: any;
     onUpdate?: (update: any) => void;
@@ -32,7 +32,7 @@ export class SwarmProcessor {
         instruction: string,
         options: SwarmProcessingOptions,
     ): Promise<SwarmFileResult> {
-        const { model, apiKey, signal } = options;
+        const { model, context, signal } = options;
         const onUpdate = options.onUpdate || (() => {}); // Ensure onUpdate is always a function
         const result: SwarmFileResult = { filePath, content: "" };
 
@@ -44,7 +44,7 @@ export class SwarmProcessor {
                 options.preReadContent || readFileSync(filePath, "utf8");
 
             // Process with LLM if available
-            if (model && apiKey) {
+            if (model && context) {
                 SwarmLogger.llmCall(options.ctx, filePath, instruction);
 
                 const prompt = this.createPrompt(
@@ -54,7 +54,7 @@ export class SwarmProcessor {
                 );
                 result.content = await this.callLLM(
                     model,
-                    apiKey,
+                    context,
                     prompt,
                     signal,
                 );
@@ -84,16 +84,30 @@ export class SwarmProcessor {
 
     private async callLLM(
         model: any,
-        apiKey: string,
+        context: any,
         prompt: string,
         signal: AbortSignal,
     ): Promise<string> {
-        const result = await completeSimple(model, apiKey, prompt, {
+        // Create a proper context object with the prompt as a user message
+        const properContext = {
+            messages: [
+                {
+                    role: "user" as const,
+                    content: prompt,
+                    timestamp: Date.now(),
+                },
+            ],
+        };
+
+        const result = await completeSimple(model, properContext, {
             signal,
             temperature: 0.1,
-            max_tokens: 2048,
+            maxTokens: 2048,
         });
-        return this.stripCodeFence(result);
+        // Ensure result is a string before stripping code fences
+        const resultText =
+            typeof result === "string" ? result : result.toString();
+        return this.stripCodeFence(resultText);
     }
 
     private stripCodeFence(text: string): string {
@@ -115,10 +129,10 @@ export class SwarmProcessor {
         const warnings: string[] = [];
 
         // Warn if any single file exceeds the per-file limit
-        for (const [index, content] of fileContents.entries()) {
-            if (content.length > this.config.maxFileChars) {
+        for (let i = 0; i < fileContents.length; i++) {
+            if (fileContents[i].length > this.config.maxFileChars) {
                 warnings.push(
-                    `File ${index + 1} exceeds per-file limit: ${content.length} > ${this.config.maxFileChars} characters`,
+                    `File ${i + 1} exceeds per-file limit: ${fileContents[i].length} > ${this.config.maxFileChars} characters`,
                 );
             }
         }
@@ -202,7 +216,7 @@ export class SwarmProcessor {
             }
         }
 
-        SwarmLogger.completeOperation(options.ctx, results);
+        SwarmLogger.completeOperation(options.ctx, results, startTime);
 
         return results;
     }
