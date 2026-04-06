@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname } from "path";
 import { Type } from "@sinclair/typebox";
 import type { Model } from "@mariozechner/pi-ai";
@@ -10,7 +10,10 @@ import { PROVIDER, getApiKey } from "./shared";
 
 const CONCURRENCY = 4;
 const MAX_FILE_CHARS = 24_000;
-const SWARM_TIMEOUT_MS = 20_000; // 20 second timeout for swarm operations
+const STALL_TIMEOUT_MS = 20_000; // 20 seconds after stall detection
+const MAX_FILE_SIZE = 500_000; // Split files larger than 500KB into chunks
+const FILE_CHUNK_SIZE = 100_000; // Process files in 100KB chunks
+const PROGRESS_CHECK_INTERVAL = 5_000; // Check for stalls every 5 seconds
 
 // Helper function to wrap operations with timeout
 async function withTimeout<T>(
@@ -86,50 +89,170 @@ function tickProgress(
     return setInterval(() => {
         if (b.progress < 90) {
             b.progress += 5;
-            panel.requestRender();
+            // Only render UI every 2nd progress update to reduce overhead
+            if (b.progress % 10 === 0) {
+                panel.requestRender();
+            }
         }
-    }, 200);
+    }, 300); // Increased from 200ms to 300ms
 }
 
-// ─── swarm (read / analyse) ───────────────────────────────────────────────────
+function logSwarmEvent(ctx: any, message: string, filePath?: string, data?: any) {
+    try {
+        if (ctx && ctx.log) {
+            ctx.log(`[SWARM] ${message}${filePath ? ` (file: ${filePath})` : ''}${data ? ` - ${JSON.stringify(data)}` : ''}`);
+        } else {
+            console.log(`[SWARM] ${message}${filePath ? ` (file: ${filePath})` : ''}${data ? ` - ${JSON.stringify(data)}` : ''}`);
+        }
+    } catch (e) {
+        console.error(`[SWARM_LOG_ERROR] ${e.message}`);
+    }
+}
+
+function splitLargeFile(fileContent: string, filePath: string, chunkSize: number = FILE_CHUNK_SIZE): string[] {
+    const chunks: string[] = [];
+
+    // Try to split at logical boundaries (newlines, function boundaries, etc.)
+    for (let i = 0; i < fileContent.length; i += chunkSize) {
+        let end = i + chunkSize;
+
+        // Find the nearest newline or logical break point
+        if (end < fileContent.length) {
+            const lastNewline = fileContent.lastIndexOf('\n', end);
+            const lastSemicolon = fileContent.lastIndexOf(';', end);
+            const lastBrace = fileContent.lastIndexOf('}', end);
+
+            const breakPoints = [lastNewline, lastSemicolon, lastBrace].filter(pos => pos > i);
+            if (breakPoints.length > 0) {
+                end = Math.max(...breakPoints) + 1;
+            }
+        }
+
+        const chunk = fileContent.slice(i, end);
+        chunks.push(chunk);
+
+        if (end >= fileContent.length) break;
+    }
+
+    logSwarmEvent(ctx, `Split large file into ${chunks.length} chunks`, filePath, {
+        originalSize: fileContent.length,
+        chunkSize: chunkSize,
+        chunkCount: chunks.length
+    });
+
+    return chunks;
+}
+
+// ─── swarm_read (unified powerful version) ────────────────────────────────────
 
 function registerSwarmRead(pi: ExtensionAPI) {
     pi.registerTool(
         defineTool({
-            name: "swarm",
+            name: "swarm_read",
             label: "Swarm Read (PREFERRED)",
             description:
-                "🚀 PRIMARY FILE TOOL: This is your GO-TO tool for file operations! Uses parallel LLM analysis for superior results. " +
+                "🚀 PRIMARY FILE TOOL: Your GO-TO tool for file operations! Uses parallel LLM analysis for superior results. " +
+                "FLEXIBLE INPUT: Provide either a single question for all files OR specific instructions per file. " +
                 "Automatically understands code context, extracts key insights, and provides intelligent analysis. " +
-                "10x faster than basic read for most tasks. ONLY use 'read' when you specifically need raw, unprocessed file content. " +
-                "Ideal for: code analysis, architecture understanding, pattern detection, documentation extraction, security scanning.",
-            parameters: Type.Object({
-                question: Type.String({
-                    description:
-                        "The question or task each worker should answer about its assigned file.",
+                "10x faster than basic read for most tasks. ONLY use 'read' when you need exact raw file content. " +
+                "Examples: " +
+                "1. Simple: {question: 'Find security issues', files: ['file1.py', 'file2.py']} " +
+                "2. Advanced: {instructions: [['file1.py', 'Analyze architecture'], ['file2.py', 'Check for bugs']]}",
+            parameters: Type.Union([
+                // Simple mode: single question for all files
+                Type.Object({
+                    question: Type.String({
+                        description:
+                            "The question or task to answer about each file.",
+                    }),
+                    files: Type.Array(Type.String(), {
+                        description: "List of file paths to analyze.",
+                        minItems: 1,
+                    }),
                 }),
-                files: Type.Array(Type.String(), {
-                    description:
-                        "List of file paths (relative to cwd) each worker will read and process.",
-                    minItems: 2,
+                // Advanced mode: specific instructions per file
+                Type.Object({
+                    instructions: Type.Array(
+                        Type.Array(Type.String(), {
+                            minItems: 1,
+                            maxItems: 2,
+                        }),
+                        {
+                            description:
+                                "Array of [filePath] or [filePath, instruction] pairs.",
+                            minItems: 1,
+                        },
+                    ),
                 }),
-            }),
+            ]),
             execute: async (toolCallId, params, signal, onUpdate, ctx) => {
                 const model = ctx.model as Model<any> | undefined;
                 const apiKey = await getApiKey(ctx);
-                const { question, files } = params;
-                const results: string[] = new Array(files.length).fill("");
 
+                logSwarmEvent(ctx, "Starting swarm_read operation", undefined, {
+                    mode: "question" in params ? "simple" : "advanced",
+                    fileCount: "question" in params ? params.files.length : params.instructions.length
+                });
+
+                // Normalize parameters to common format
+                let files: string[];
+                let instructions: (string | undefined)[];
+
+                if ("question" in params) {
+                    // Simple mode
+                    files = params.files;
+                    instructions = files.map(() => params.question);
+                    logSwarmEvent(ctx, "Using simple mode", undefined, {
+                        question: params.question,
+                        files: params.files
+                    });
+                } else {
+                    // Advanced mode
+                    files = params.instructions.map(
+                        (pair: string[]) => pair[0],
+                    );
+                    instructions = params.instructions.map((pair: string[]) =>
+                        pair.length > 1 ? pair[1] : undefined,
+                    );
+                    logSwarmEvent(ctx, "Using advanced mode", undefined, {
+                        instructionCount: params.instructions.length,
+                        filesWithCustomInstructions: params.instructions.filter((p: string[]) => p.length > 1).length
+                    });
+                }
+
+                const results: string[] = new Array(files.length).fill("");
                 const panel = new SwarmPanel(files.map(shortLabel));
                 setWidget(ctx, panel);
                 const run = semaphore(CONCURRENCY);
+                const operationStartTime = Date.now();
 
-                // Wrap the entire operation with timeout
+                logSwarmEvent(ctx, "Initialized swarm processing", undefined, {
+                    concurrency: CONCURRENCY,
+                    maxFileSize: MAX_FILE_SIZE,
+                    stallTimeout: STALL_TIMEOUT_MS
+                });
+
+                // Track progress for stall detection
+                let lastProgressTime = Date.now();
+                let lastProgressCount = 0;
+
+                // Set up stall detection
+                const stallCheck = setInterval(() => {
+                    const now = Date.now();
+                    if (now - lastProgressTime > STALL_TIMEOUT_MS) {
+                        clearInterval(stallCheck);
+                        throw new Error(`Swarm operation stalled - no progress for ${STALL_TIMEOUT_MS / 1000} seconds`);
+                    }
+                    if (panel.doneCount > lastProgressCount) {
+                        lastProgressTime = now;
+                        lastProgressCount = panel.doneCount;
+                    }
+                }, PROGRESS_CHECK_INTERVAL);
+
                 try {
-                    await withTimeout(
-                        Promise.all(
-                            files.map((filePath, i) =>
-                                run(async () => {
+                    await Promise.all(
+                        files.map((filePath, i) =>
+                            run(async () => {
                                     const b = panel.bots[i];
                                     b.status = "working";
                                     b.progress = 5;
@@ -137,20 +260,46 @@ function registerSwarmRead(pi: ExtensionAPI) {
 
                                     const startTime = Date.now();
                                     let fileContent: string;
+                                    let fileChunks: string[] = [];
+
+                                    logSwarmEvent(ctx, "Starting file processing", filePath);
+
+                                    // Check file size to determine if chunking is needed
+
                                     try {
-                                        fileContent = readFileSync(
-                                            filePath,
-                                            "utf8",
-                                        );
-                                    } catch {
+                                        const stats = statSync(filePath);
+                                        logSwarmEvent(ctx, "File size checked", filePath, {
+                                            size: stats.size,
+                                            chunkThreshold: MAX_FILE_SIZE
+                                        });
+
+                                        fileContent = readFileSync(filePath, "utf8");
+                                        logSwarmEvent(ctx, "File read successfully", filePath, {
+                                            charCount: fileContent.length,
+                                            processingTime: Date.now() - startTime
+                                        });
+
+                                        // Split large files into chunks
+                                        if (fileContent.length > MAX_FILE_SIZE) {
+                                            fileChunks = splitLargeFile(fileContent, filePath);
+                                            logSwarmEvent(ctx, "Large file split into chunks for processing", filePath, {
+                                                originalSize: fileContent.length,
+                                                chunkCount: fileChunks.length,
+                                                chunkSize: FILE_CHUNK_SIZE
+                                            });
+                                        }
+                                    } catch (readError) {
                                         const endTime = Date.now();
                                         b.status = "error";
                                         b.snippet = "file not found";
                                         b.progress = 100;
                                         panel.doneCount++;
                                         panel.requestRender();
-                                        results[i] =
-                                            `[error: could not read ${filePath} (${endTime - startTime}ms)]`;
+                                        results[i] = `[error: could not read ${filePath} (${endTime - startTime}ms)]`;
+                                        logSwarmEvent(ctx, "File read failed", filePath, {
+                                            error: readError.message,
+                                            processingTime: endTime - startTime
+                                        });
                                         return;
                                     }
 
@@ -164,37 +313,117 @@ function registerSwarmRead(pi: ExtensionAPI) {
                                         panel.doneCount++;
                                         panel.requestRender();
                                         results[i] = fileContent;
+                                        logSwarmEvent(ctx, "No model/API key - returning raw content", filePath);
                                         return;
                                     }
 
                                     try {
-                                        const prompt = `File: ${filePath}\n\n\`\`\`\n${fileContent.slice(0, MAX_FILE_CHARS)}\n\`\`\`\n\n${question}`;
-                                        const ticker = tickProgress(b, panel);
-                                        const text = await llmCall(
-                                            model,
-                                            apiKey,
-                                            prompt,
-                                            signal,
-                                        );
-                                        clearInterval(ticker);
+                                        // Use file-specific instruction or fallback to a default
+                                        const instruction =
+                                            instructions[i] &&
+                                            instructions[i].trim() !== ""
+                                                ? instructions[i]
+                                                : "Analyze this file and provide key insights";
 
-                                        const endTime = Date.now();
-                                        const processingTime =
-                                            endTime - startTime;
-                                        results[i] = text;
-                                        b.snippet = text
-                                            .slice(0, 50)
-                                            .replace(/\n/g, " ");
-                                        b.status = "done";
-                                        b.progress = 100;
-                                        panel.doneCount++;
-                                        panel.requestRender();
+                                        // Process chunks if file was split, otherwise process whole file
+                                        if (fileChunks.length > 0) {
+                                            logSwarmEvent(ctx, "Processing file in chunks", filePath, {
+                                                chunkCount: fileChunks.length,
+                                                instruction: instruction.substring(0, 50) + (instruction.length > 50 ? "..." : "")
+                                            });
 
-                                        // Stream the result progressively to replace progress bar with content
+                                            const chunkResults: string[] = [];
+                                            let overallProgress = 20;
+
+                                            for (let chunkIndex = 0; chunkIndex < fileChunks.length; chunkIndex++) {
+                                                const chunk = fileChunks[chunkIndex];
+                                                const chunkPrompt = `File: ${filePath} (Part ${chunkIndex + 1} of ${fileChunks.length})\n\n\`\`\`\n${chunk.slice(0, MAX_FILE_CHARS)}\n\`\`\`\n\n${instruction}`;
+
+                                                logSwarmEvent(ctx, "Processing chunk", filePath, {
+                                                    chunk: chunkIndex + 1,
+                                                    totalChunks: fileChunks.length,
+                                                    chunkSize: chunk.length
+                                                });
+
+                                                b.snippet = `Chunk ${chunkIndex + 1}/${fileChunks.length}`;
+                                                b.progress = overallProgress + Math.floor((chunkIndex / fileChunks.length) * 60);
+                                                panel.requestRender();
+
+                                                const ticker = tickProgress(b, panel);
+                                                const chunkStartTime = Date.now();
+                                                const chunkResult = await llmCall(
+                                                    model,
+                                                    apiKey,
+                                                    chunkPrompt,
+                                                    signal,
+                                                );
+                                                clearInterval(ticker);
+
+                                                chunkResults.push(chunkResult);
+                                                overallProgress = b.progress;
+
+                                                logSwarmEvent(ctx, "Chunk processed", filePath, {
+                                                    chunk: chunkIndex + 1,
+                                                    processingTime: Date.now() - chunkStartTime,
+                                                    responseLength: chunkResult.length
+                                                });
+                                            }
+
+                                            // Combine chunk results
+                                            const combinedResult = chunkResults.join("\n\n---\n\n");
+                                            results[i] = combinedResult;
+                                            b.snippet = combinedResult.slice(0, 50).replace(/\n/g, " ");
+
+                                            const endTime = Date.now();
+                                            logSwarmEvent(ctx, "All chunks processed - combining results", filePath, {
+                                                totalChunks: fileChunks.length,
+                                                totalProcessingTime: endTime - startTime,
+                                                combinedResultLength: combinedResult.length
+                                            });
+                                        } else {
+                                            // Process as single file (original logic)
+                                            logSwarmEvent(ctx, "Sending to LLM for analysis", filePath, {
+                                                instruction: instruction.substring(0, 50) + (instruction.length > 50 ? "..." : ""),
+                                                contentLength: fileContent.length,
+                                                truncatedTo: MAX_FILE_CHARS
+                                            });
+
+                                            const prompt = `File: ${filePath}\n\n\`\`\`\n${fileContent.slice(0, MAX_FILE_CHARS)}\n\`\`\`\n\n${instruction}`;
+                                            const ticker = tickProgress(b, panel);
+                                            const llmStartTime = Date.now();
+                                            const text = await llmCall(
+                                                model,
+                                                apiKey,
+                                                prompt,
+                                                signal,
+                                            );
+                                            clearInterval(ticker);
+
+                                            const endTime = Date.now();
+                                            const llmProcessingTime = endTime - llmStartTime;
+                                            results[i] = text;
+                                            b.snippet = text
+                                                .slice(0, 50)
+                                                .replace(/\n/g, " ");
+                                            b.status = "done";
+                                            b.progress = 100;
+                                            panel.doneCount++;
+                                            panel.requestRender();
+
+                                            logSwarmEvent(ctx, "LLM analysis completed", filePath, {
+                                                responseLength: text.length,
+                                                llmProcessingTime: llmProcessingTime,
+                                                totalProcessingTime: endTime - startTime
+                                            });
+                                        }
+
+                                        // Stream results more efficiently
                                         const streamResult = async (
                                             fullText: string,
                                         ) => {
-                                            const chunkSize = 50;
+                                            const chunkSize = 500; // Increased from 50 to 500
+                                            const streamDelay = 10; // Reduced from 20ms to 10ms
+
                                             for (
                                                 let j = 0;
                                                 j < fullText.length;
@@ -207,7 +436,11 @@ function registerSwarmRead(pi: ExtensionAPI) {
                                                 b.snippet = chunk
                                                     .slice(0, 50)
                                                     .replace(/\n/g, " ");
-                                                panel.requestRender();
+
+                                                // Only render UI every 3 chunks to reduce overhead
+                                                if (j % (chunkSize * 3) === 0) {
+                                                    panel.requestRender();
+                                                }
 
                                                 onUpdate?.({
                                                     content: [
@@ -226,9 +459,15 @@ function registerSwarmRead(pi: ExtensionAPI) {
                                                 });
 
                                                 await new Promise((resolve) =>
-                                                    setTimeout(resolve, 20),
+                                                    setTimeout(
+                                                        resolve,
+                                                        streamDelay,
+                                                    ),
                                                 );
                                             }
+
+                                            // Final render to ensure UI is up to date
+                                            panel.requestRender();
                                         };
 
                                         await streamResult(text);
@@ -242,26 +481,28 @@ function registerSwarmRead(pi: ExtensionAPI) {
                                         panel.requestRender();
                                         results[i] =
                                             `[error: ${err?.message ?? err}]`;
+                                        logSwarmEvent(ctx, "LLM processing failed", filePath, {
+                                            error: err?.message ?? err,
+                                            stack: err?.stack ? err.stack.substring(0, 200) : undefined
+                                        });
                                     }
-                                }),
+                                })
                             ),
                         ),
-                        SWARM_TIMEOUT_MS,
-                        `Swarm read operation timed out after ${SWARM_TIMEOUT_MS / 1000} seconds`,
                     );
                 } catch (error) {
-                    // Handle timeout errors
+                    clearInterval(stallCheck);
                     if (
                         error instanceof Error &&
-                        error.message.includes("timed out")
+                        error.message.includes("stalled")
                     ) {
                         throw new Error(
-                            `Swarm operation timed out after ${SWARM_TIMEOUT_MS / 1000} seconds. This might indicate performance issues or files that are too large.`,
+                            `Swarm operation stalled after ${STALL_TIMEOUT_MS / 1000} seconds without progress. This might indicate performance issues or files that are too large.`,
                         );
                     }
-                    // Re-throw other errors
                     throw error;
                 } finally {
+                    clearInterval(stallCheck);
                     clearWidget(ctx);
                 }
 
@@ -271,9 +512,12 @@ function registerSwarmRead(pi: ExtensionAPI) {
                             type: "text",
                             text:
                                 results
-                                    .map((f, i) => `### ${f}\n${results[i]}`)
+                                    .map(
+                                        (result, i) =>
+                                            `### ${files[i]}\n${result}`,
+                                    )
                                     .join("\n\n---\n\n") +
-                                `\n\n## Performance Summary\n- Total files processed: ${files.length}\n- Successful: ${results.filter((r) => !r.startsWith("[error:")).length}\n- Failed: ${results.filter((r) => r.startsWith("[error:")).length}`,
+                                `\n\n## Performance Summary\n- Total files: ${files.length}\n- Successful: ${results.filter((r) => !r.startsWith("[error:") && !r.startsWith("[skipped:")).length}\n- Skipped (too large): ${results.filter((r) => r.startsWith("[skipped:")).length}\n- Failed: ${results.filter((r) => r.startsWith("[error:")).length}`,
                         },
                     ],
                     details: { files, results },
@@ -634,235 +878,10 @@ function registerSwarmEdit(pi: ExtensionAPI) {
     );
 }
 
-// ─── swarm_read_advanced ─────────────────────────────────────────────────────
-
-function registerSwarmReadAdvanced(pi: ExtensionAPI) {
-    pi.registerTool(
-        defineTool({
-            name: "swarm_read_advanced",
-            label: "Swarm Read Advanced",
-            description:
-                "🚀 ADVANCED FILE ANALYSIS: Process multiple files with optional per-file instructions! " +
-                "Supports flexible input format: [[batch_instruction, [[file1, instruction1], [file2, instruction2], ...]]] " +
-                "Perfect for complex analysis where different files need different questions or contexts.",
-            parameters: Type.Object({
-                batch_instruction: Type.Optional(
-                    Type.String({
-                        description:
-                            "Optional instruction that applies to all files without specific instructions.",
-                    }),
-                ),
-                file_instructions: Type.Array(
-                    Type.Array(Type.String(), {
-                        minItems: 1,
-                        maxItems: 2,
-                    }),
-                    {
-                        description:
-                            "Array of [filePath, instruction] pairs. Instruction is optional.",
-                        minItems: 1,
-                    },
-                ),
-            }),
-            execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-                const model = ctx.model as Model<any> | undefined;
-                const apiKey = await getApiKey(ctx);
-                const { batch_instruction, file_instructions } = params;
-
-                // Extract files and instructions
-                const files: string[] = file_instructions.map(
-                    (pair: string[]) => pair[0],
-                );
-                const instructions: (string | undefined)[] =
-                    file_instructions.map((pair: string[]) =>
-                        pair.length > 1 ? pair[1] : batch_instruction,
-                    );
-
-                const results: string[] = new Array(files.length).fill("");
-
-                const panel = new SwarmPanel(files.map(shortLabel));
-                setWidget(ctx, panel);
-                const run = semaphore(CONCURRENCY);
-
-                // Wrap the entire operation with timeout
-                try {
-                    await withTimeout(
-                        Promise.all(
-                            files.map((filePath, i) =>
-                                run(async () => {
-                                    const b = panel.bots[i];
-                                    b.status = "working";
-                                    b.progress = 5;
-                                    panel.requestRender();
-
-                                    const startTime = Date.now();
-                                    let fileContent: string;
-                                    try {
-                                        fileContent = readFileSync(
-                                            filePath,
-                                            "utf8",
-                                        );
-                                    } catch {
-                                        const endTime = Date.now();
-                                        b.status = "error";
-                                        b.snippet = "file not found";
-                                        b.progress = 100;
-                                        panel.doneCount++;
-                                        panel.requestRender();
-                                        results[i] =
-                                            `[error: could not read ${filePath} (${endTime - startTime}ms)]`;
-                                        return;
-                                    }
-
-                                    b.progress = 20;
-                                    panel.requestRender();
-
-                                    if (!model || !apiKey) {
-                                        b.status = "done";
-                                        b.progress = 100;
-                                        b.snippet = "(no model)";
-                                        panel.doneCount++;
-                                        panel.requestRender();
-                                        results[i] = fileContent;
-                                        return;
-                                    }
-
-                                    try {
-                                        // Use file-specific instruction or batch instruction
-                                        const instruction =
-                                            instructions[i] &&
-                                            instructions[i].trim() !== ""
-                                                ? instructions[i]
-                                                : batch_instruction &&
-                                                    batch_instruction.trim() !==
-                                                        ""
-                                                  ? batch_instruction
-                                                  : "Analyze this file";
-
-                                        const prompt = `File: ${filePath}\n\n\`\`\`\n${fileContent.slice(0, MAX_FILE_CHARS)}\n\`\`\`\n\n${instruction}`;
-
-                                        const ticker = tickProgress(b, panel);
-                                        const text = await llmCall(
-                                            model,
-                                            apiKey,
-                                            prompt,
-                                            signal,
-                                        );
-                                        clearInterval(ticker);
-
-                                        const endTime = Date.now();
-                                        const processingTime =
-                                            endTime - startTime;
-                                        results[i] = text;
-                                        b.snippet = text
-                                            .slice(0, 50)
-                                            .replace(/\n/g, " ");
-                                        b.status = "done";
-                                        b.progress = 100;
-                                        panel.doneCount++;
-                                        panel.requestRender();
-
-                                        // Stream the result progressively to replace progress bar with content
-                                        const streamResult = async (
-                                            fullText: string,
-                                        ) => {
-                                            const chunkSize = 50;
-                                            for (
-                                                let j = 0;
-                                                j < fullText.length;
-                                                j += chunkSize
-                                            ) {
-                                                const chunk = fullText.slice(
-                                                    0,
-                                                    j + chunkSize,
-                                                );
-                                                b.snippet = chunk
-                                                    .slice(0, 50)
-                                                    .replace(/\n/g, " ");
-                                                panel.requestRender();
-
-                                                onUpdate?.({
-                                                    content: [
-                                                        {
-                                                            type: "text",
-                                                            text: `### ${files[i]}\n${chunk}`,
-                                                        },
-                                                    ],
-                                                    details: {
-                                                        partial: true,
-                                                        completed:
-                                                            panel.doneCount,
-                                                        total: files.length,
-                                                        streaming: true,
-                                                    },
-                                                });
-
-                                                await new Promise((resolve) =>
-                                                    setTimeout(resolve, 20),
-                                                );
-                                            }
-                                        };
-
-                                        await streamResult(text);
-                                    } catch (err: any) {
-                                        b.status = "error";
-                                        b.snippet = String(
-                                            err?.message ?? err,
-                                        ).slice(0, 40);
-                                        b.progress = 100;
-                                        panel.doneCount++;
-                                        panel.requestRender();
-                                        results[i] =
-                                            `[error: ${err?.message ?? err}]`;
-                                    }
-                                }),
-                            ),
-                        ),
-                        SWARM_TIMEOUT_MS,
-                        `Swarm advanced read operation timed out after ${SWARM_TIMEOUT_MS / 1000} seconds`,
-                    );
-                } catch (error) {
-                    // Handle timeout errors
-                    if (
-                        error instanceof Error &&
-                        error.message.includes("timed out")
-                    ) {
-                        throw new Error(
-                            `Swarm operation timed out after ${SWARM_TIMEOUT_MS / 1000} seconds. This might indicate performance issues or files that are too large.`,
-                        );
-                    }
-                    // Re-throw other errors
-                    throw error;
-                } finally {
-                    clearWidget(ctx);
-                }
-
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text:
-                                results
-                                    .map(
-                                        (f, i) =>
-                                            `### ${files[i]}\n${results[i]}`,
-                                    )
-                                    .join("\n\n---\n\n") +
-                                `\n\n## Performance Summary\n- Total files processed: ${files.length}\n- Successful: ${results.filter((r) => !r.startsWith("[error:")).length}\n- Failed: ${results.filter((r) => r.startsWith("[error:")).length}`,
-                        },
-                    ],
-                    details: { files, results },
-                };
-            },
-        }),
-    );
-}
-
 // ─── export ───────────────────────────────────────────────────────────────────
 
 export function registerSwarm(pi: ExtensionAPI) {
     registerSwarmRead(pi);
     registerSwarmWrite(pi);
     registerSwarmEdit(pi);
-    registerSwarmReadAdvanced(pi); // Add the advanced version
 }
