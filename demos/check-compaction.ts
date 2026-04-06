@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { completeSimple } from "@mariozechner/pi-ai";
 import type { Model, Context } from "@mariozechner/pi-ai";
 import { tokenize } from "../src/tokenize";
+import { summaryPrompt } from "../src/handlers/compaction";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -64,11 +65,6 @@ const model: Model<"openai-completions"> = {
     contextWindow: REPORTED_WINDOW,
     maxTokens: REAL_WINDOW,
 };
-
-const summaryPrompt = readFileSync(
-    resolve(__dirname, "../summaryPrompt.txt"),
-    "utf8",
-);
 
 // --- Session loading ---
 

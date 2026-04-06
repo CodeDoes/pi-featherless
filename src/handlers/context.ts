@@ -8,15 +8,27 @@ import { handleApiError } from "./concurrency";
 // We only call the tokenize API again once this exceeds the threshold.
 const CHAR_CHECK_THRESHOLD = 10000;
 
-const tracker = new Map<string, { charsSinceLastCheck: number; lastTokenCount: number }>();
+const tracker = new Map<
+    string,
+    { charsSinceLastCheck: number; lastTokenCount: number }
+>();
 
-async function countTokens(modelId: string, messages: any[], apiKey: string | undefined): Promise<number> {
+async function countTokens(
+    modelId: string,
+    messages: any[],
+    apiKey: string | undefined,
+): Promise<number> {
     let total = 0;
     for (const msg of messages) {
         const text = extractText(msg);
         if (text) {
-            try { total += await tokenize(modelId, text, apiKey); }
-            catch { total += Math.ceil(text.length / 4); }
+            try {
+                // Extract base model name for tokenize API (e.g., "GLM-4.7-Flash" from "zai-org/GLM-4.7-Flash")
+                const baseModelName = modelId.split("/").pop() || modelId;
+                total += await tokenize(baseModelName, text, apiKey);
+            } catch {
+                total += Math.ceil(text.length / 4);
+            }
         }
     }
     return total;
@@ -38,7 +50,11 @@ export function registerContextTracking(pi: ExtensionAPI) {
         const sessionFile = ctx.sessionManager.getSessionFile()!;
         const entry = tracker.get(sessionFile);
 
-        if (entry && entry.lastTokenCount > 0 && entry.charsSinceLastCheck < CHAR_CHECK_THRESHOLD) {
+        if (
+            entry &&
+            entry.lastTokenCount > 0 &&
+            entry.charsSinceLastCheck < CHAR_CHECK_THRESHOLD
+        ) {
             return;
         }
 
@@ -47,7 +63,10 @@ export function registerContextTracking(pi: ExtensionAPI) {
 
         try {
             const count = await countTokens(model.id, messages, apiKey);
-            tracker.set(sessionFile, { charsSinceLastCheck: 0, lastTokenCount: count });
+            tracker.set(sessionFile, {
+                charsSinceLastCheck: 0,
+                lastTokenCount: count,
+            });
         } catch (err) {
             handleApiError(err);
         }
@@ -61,11 +80,15 @@ export function registerContextTracking(pi: ExtensionAPI) {
         if (!realContextWindow) return;
 
         const sessionFile = ctx.sessionManager.getSessionFile()!;
-        const entry = tracker.get(sessionFile) ?? { charsSinceLastCheck: 0, lastTokenCount: 0 };
+        const entry = tracker.get(sessionFile) ?? {
+            charsSinceLastCheck: 0,
+            lastTokenCount: 0,
+        };
 
         let charsAdded = 0;
-        for (const block of (event.content ?? [])) {
-            if (block.type === "text" && block.text) charsAdded += block.text.length;
+        for (const block of event.content ?? []) {
+            if (block.type === "text" && block.text)
+                charsAdded += block.text.length;
         }
         entry.charsSinceLastCheck += charsAdded;
         tracker.set(sessionFile, entry);

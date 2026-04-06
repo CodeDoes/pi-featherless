@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Featherless Provider for Pi with accurate tokenization and concurrency tracking.",
     "type": "module",
-    "main": "src/index.ts",
+    "main": "index.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1"
     },
