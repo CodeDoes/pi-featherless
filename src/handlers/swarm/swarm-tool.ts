@@ -84,12 +84,23 @@ export function registerSwarmRead(pi: ExtensionAPI) {
                         },
                     };
                 } catch (error) {
+                    const errorMessage =
+                        error instanceof Error ? error.message : String(error);
                     SwarmLogger.log(ctx, "Tool execution failed", {
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
+                        error: errorMessage,
+                        stack: error instanceof Error ? error.stack : undefined,
+                        errorType:
+                            error instanceof Error ? error.name : typeof error,
                     });
+
+                    // Check if this is the onUpdate error and provide more context
+                    if (errorMessage.includes("onUpdate")) {
+                        console.error("DEBUG: onUpdate error occurred");
+                        console.error("DEBUG: onUpdate type:", typeof onUpdate);
+                        console.error("DEBUG: onUpdate value:", onUpdate);
+                        console.error("DEBUG: Full error:", error);
+                    }
+
                     throw error;
                 }
             },
