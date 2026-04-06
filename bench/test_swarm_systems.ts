@@ -1,4 +1,4 @@
-/re/**
+/**
  * Swarm Read Systems Test
  *
  * Comprehensive systems test for the enhanced swarm_read functionality.
