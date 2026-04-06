@@ -9,7 +9,7 @@
 interface ModelClass {
     context_limit: number;
     concurrency_use: number;
-    chars_per_token?: number;  // Default 3.2 (chars/4 overestimates; real average is ~3.2)
+    chars_per_token?: number; // Default 3.2 (chars/4 overestimates; real average is ~3.2)
     cost: {
         input: number;
         output: number;
@@ -19,20 +19,77 @@ interface ModelClass {
 }
 
 const MODEL_CLASSES: Record<string, ModelClass> = {
-    "glm4-9b": { context_limit: 32768, concurrency_use: 1, cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 } },
-    "glm4-32b": { context_limit: 32768, concurrency_use: 2, cost: { input: 0.3, output: 0.3, cacheRead: 0.15, cacheWrite: 0.3 } },
-    "glm47-flash": { context_limit: 32768, concurrency_use: 2, cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 } },
-    "glm47-357b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "glm5-754b": { context_limit: 32768, concurrency_use: 4, cost: { input: 2.0, output: 2.0, cacheRead: 1.0, cacheWrite: 2.0 } },
-    "minimax-m25": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "kimi-k2": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "kimi-k25": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "deepseek-v3.2": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "deepseek31-685b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "mistral-24b-2503": { context_limit: 32768, concurrency_use: 2, cost: { input: 0.5, output: 0.5, cacheRead: 0.25, cacheWrite: 0.5 } },
-    "qwen3-32b": { context_limit: 32768, concurrency_use: 2, chars_per_token: 3.12, cost: { input: 0.4, output: 0.4, cacheRead: 0.2, cacheWrite: 0.4 } },
-    "qwen3-235b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 } },
-    "qwen3-coder-480b": { context_limit: 32768, concurrency_use: 4, cost: { input: 1.5, output: 1.5, cacheRead: 0.75, cacheWrite: 1.5 } },
+    "glm4-9b": {
+        context_limit: 32768,
+        concurrency_use: 1,
+        cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 },
+    },
+    "glm4-32b": {
+        context_limit: 32768,
+        concurrency_use: 2,
+        cost: { input: 0.3, output: 0.3, cacheRead: 0.15, cacheWrite: 0.3 },
+    },
+    "glm47-flash": {
+        context_limit: 32768,
+        concurrency_use: 2,
+        cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 },
+    },
+    "glm47-357b": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "glm5-754b": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 2.0, output: 2.0, cacheRead: 1.0, cacheWrite: 2.0 },
+    },
+    "minimax-m25": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "kimi-k2": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "kimi-k25": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "deepseek-v3.2": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "deepseek31-685b": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "mistral-24b-2503": {
+        context_limit: 32768,
+        concurrency_use: 2,
+        cost: { input: 0.5, output: 0.5, cacheRead: 0.25, cacheWrite: 0.5 },
+    },
+    "qwen3-32b": {
+        context_limit: 32768,
+        concurrency_use: 2,
+        chars_per_token: 3.12,
+        cost: { input: 0.4, output: 0.4, cacheRead: 0.2, cacheWrite: 0.4 },
+    },
+    "qwen3-235b": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
+    },
+    "qwen3-coder-480b": {
+        context_limit: 32768,
+        concurrency_use: 4,
+        cost: { input: 1.5, output: 1.5, cacheRead: 0.75, cacheWrite: 1.5 },
+    },
 };
 
 export interface ModelEntry {
@@ -52,31 +109,66 @@ export const MODELS: ModelEntry[] = [
     { id: "zai-org/GLM-5", model_class: "glm5-754b", tool_use: true },
 
     // MiniMax
-    { id: "MiniMaxAI/MiniMax-M2.5", model_class: "minimax-m25", tool_use: true },
+    {
+        id: "MiniMaxAI/MiniMax-M2.5",
+        model_class: "minimax-m25",
+        tool_use: true,
+    },
 
     // Kimi — officially supported for tool calling
-    { id: "moonshotai/Kimi-K2-Instruct", model_class: "kimi-k2", tool_use: true },
+    {
+        id: "moonshotai/Kimi-K2-Instruct",
+        model_class: "kimi-k2",
+        tool_use: true,
+    },
     { id: "moonshotai/Kimi-K2.5", model_class: "kimi-k25", tool_use: true },
 
     // DeepSeek
-    { id: "deepseek-ai/DeepSeek-V3.2", model_class: "deepseek-v3.2", tool_use: true },
-    { id: "deepseek-ai/DeepSeek-V3.1", model_class: "deepseek31-685b", tool_use: true },
+    {
+        id: "deepseek-ai/DeepSeek-V3.2",
+        model_class: "deepseek-v3.2",
+        tool_use: true,
+    },
+    {
+        id: "deepseek-ai/DeepSeek-V3.1",
+        model_class: "deepseek31-685b",
+        tool_use: true,
+    },
 
     // Mistral
-    { id: "mistralai/Mistral-Small-3.2-24B-Instruct-2506", model_class: "mistral-24b-2503", tool_use: true },
+    {
+        id: "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+        model_class: "mistral-24b-2503",
+        tool_use: true,
+    },
 
     // Qwen3 — officially supported for tool calling
-    { id: "Qwen/Qwen3-32B", model_class: "qwen3-32b", reasoning: true, tool_use: true },
-    { id: "Qwen/Qwen3-235B-A22B", model_class: "qwen3-235b", reasoning: true, tool_use: true },
-    { id: "Qwen/Qwen3-Coder-480B-A35B-Instruct", model_class: "qwen3-coder-480b", reasoning: true, tool_use: true },
+    {
+        id: "Qwen/Qwen3-32B",
+        model_class: "qwen3-32b",
+        reasoning: true,
+        tool_use: true,
+    },
+    {
+        id: "Qwen/Qwen3-235B-A22B",
+        model_class: "qwen3-235b",
+        reasoning: true,
+        tool_use: true,
+    },
+    {
+        id: "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        model_class: "qwen3-coder-480b",
+        reasoning: true,
+        tool_use: true,
+    },
 ];
 
 /**
  * Safety factor for context window.
- * 
+ *
  * Pi's chars/4 heuristic underestimates tokens by ~27% on average.
  * To prevent silent overflow, we reduce the reported context window.
- * 
+ *
  * With SAFETY_FACTOR = 0.75:
  * - Real 32k context -> reported 24k
  * - When pi thinks it's at 24k, it's actually at ~32k
@@ -87,16 +179,16 @@ const SAFETY_FACTOR = 0.75;
 export function getModelConfig(entry: ModelEntry) {
     const mc = MODEL_CLASSES[entry.model_class];
     if (!mc) throw new Error(`Unknown model_class: ${entry.model_class}`);
-    
+
     // Apply safety factor to prevent overflow from chars/4 underestimation
     const safeContextWindow = Math.floor(mc.context_limit * SAFETY_FACTOR);
-    
+
     return {
         id: entry.id,
         name: entry.id,
         reasoning: entry.reasoning ?? false,
-        contextWindow: safeContextWindow,
-        maxTokens: mc.context_limit,  // Keep real limit for output
+        contextWindow: mc.context_limit, // Use real context window for UI display
+        maxTokens: mc.context_limit, // Keep real limit for output
         input: ["text"] as ("text" | "image")[],
         cost: mc.cost,
     };
@@ -106,7 +198,7 @@ export function getModelConfig(entry: ModelEntry) {
  * Get the real context limit for a model (before safety factor).
  */
 export function getRealContextLimit(modelId: string): number | undefined {
-    const entry = MODELS.find(m => m.id === modelId);
+    const entry = MODELS.find((m) => m.id === modelId);
     if (!entry) return undefined;
     const mc = MODEL_CLASSES[entry.model_class];
     return mc?.context_limit;
@@ -134,6 +226,6 @@ export function getConcurrencyUse(modelClass: string): number {
  * Get the model class for a model ID.
  */
 export function getModelClass(modelId: string): string | undefined {
-    const entry = MODELS.find(m => m.id === modelId);
+    const entry = MODELS.find((m) => m.id === modelId);
     return entry?.model_class;
 }
