@@ -1,9 +1,10 @@
 import { readFileSync } from "fs";
 import { completeSimple } from "@mariozechner/pi-ai";
-import { semaphore } from "../concurrency";
+
 import { SwarmPanel } from "./swarm-panel";
 import { SwarmLogger } from "./swarm-logger";
 import { SwarmConfig, SwarmFileResult } from "./swarm-types";
+import { semaphore } from "./concurrency";
 
 const DEFAULT_CONFIG: SwarmConfig = {
     concurrency: 4,
