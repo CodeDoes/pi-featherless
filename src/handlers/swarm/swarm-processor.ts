@@ -30,8 +30,8 @@ export class SwarmProcessor {
         try {
             SwarmLogger.fileProcessing(options.ctx, filePath, "start");
 
-            // Read file
-            const fileContent = readFileSync(filePath, "utf8");
+            // Read file (or use pre-read content if available)
+            const fileContent = options.preReadContent || readFileSync(filePath, "utf8");
 
             // Process with LLM if available
             if (model && apiKey) {
@@ -90,6 +90,27 @@ export class SwarmProcessor {
         return text.replace(/^```[^\n]*\n([\s\S]*?)```\s*$/m, "$1").trim();
     }
 
+    private checkContextLimit(fileContents: string[]): { withinLimit: boolean, totalChars: number, warnings: string[] } {
+        const totalChars = fileContents.reduce((sum, content) => sum + content.length, 0);
+        const withinLimit = totalChars <= this.config.maxFileChars * fileContents.length;
+
+        const warnings: string[] = [];
+
+        // Warn if any single file exceeds the per-file limit
+        for (const [index, content] of fileContents.entries()) {
+            if (content.length > this.config.maxFileChars) {
+                warnings.push(`File ${index + 1} exceeds per-file limit: ${content.length} > ${this.config.maxFileChars} characters`);
+            }
+        }
+
+        // Warn if total content is very large
+        if (totalChars > this.config.maxFileChars * fileContents.length * 0.8) {
+            warnings.push(`Total content approaches context limits: ${totalChars} characters`);
+        }
+
+        return { withinLimit, totalChars, warnings };
+    }
+
     async processFiles(
         filePaths: string[],
         instructions: string[],
@@ -101,12 +122,30 @@ export class SwarmProcessor {
         const startTime = Date.now();
         const onUpdate = options.onUpdate || (() => {}); // Ensure onUpdate is always defined
 
+        // Check context limits before processing
+        const fileContents = await Promise.all(
+            filePaths.map(filePath =>
+                readFileSync(filePath, "utf8").slice(0, this.config.maxFileChars)
+            )
+        );
+
+        const { withinLimit, totalChars, warnings } = this.checkContextLimit(fileContents);
+        if (warnings.length > 0) {
+            SwarmLogger.log(options.ctx, "Context limit warnings", {
+                warnings,
+                totalChars,
+                maxPerFile: this.config.maxFileChars,
+                fileCount: filePaths.length
+            });
+        }
+
         // Process files in parallel using semaphore for concurrency control
         const run = semaphore(this.config.concurrency);
         const filePromises = filePaths.map((filePath, i) =>
             run(async () => {
                 const instruction = instructions[i] || "Analyze this file and provide key insights";
-                return this.processFile(filePath, instruction, options);
+                const fileContent = fileContents[i]; // Use pre-read content
+                return this.processFile(filePath, instruction, { ...options, preReadContent: fileContent });
             })
         );
 
