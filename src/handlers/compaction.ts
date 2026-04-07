@@ -5,28 +5,120 @@ import {
     serializeConversation,
     convertToLlm,
 } from "@mariozechner/pi-coding-agent";
-import { readFileSync } from "fs";
 import { PROVIDER, getApiKey } from "./shared";
 
-export const summaryPrompt = `
-You are a technical context summarizer. Create a HIGH-FIDELITY structured summary of this conversation for another LLM to continue the work without losing track of details.
+/**
+ * High-Performance Compaction Handler for Featherless AI.
+ *
+ * Strategy:
+ * 1. Strip verbose tool outputs and thinking blocks to maximize signal-to-noise.
+ * 2. Use character-based chunking (~30k chars) to respect 8k-16k context windows.
+ * 3. Parallelize summarization using Qwen2.5-Coder-7B (Cost 1).
+ * 4. Join summaries directly without an expensive merge step to minimize TTFT.
+ */
 
-RULES:
-1. Preserve ALL exact file paths, function names, and specific error messages.
-2. List all files currently in the conversation's "active set" (files that were read or modified).
-3. Record the CURRENT STATE of the work: what was just attempted, what succeeded, and what failed.
-4. Capture KEY DECISIONS and their rationale.
-5. Identify the next 3-5 concrete steps.
+const SUB_SUMMARY_PROMPT = `Summarize this technical segment. Focus: paths, logic, errors, state. Strip: raw tool output, filler.\n\n<segment>\n\${segmentText}\n</segment>`;
 
-\${previousContext}
+const FAST_MODEL_ID = "Qwen/Qwen2.5-Coder-7B-Instruct";
+const CHUNK_SIZE_CHARS = 30000; // Aim for ~9k tokens per chunk to fit in 16k window
 
-<conversation>
-\${conversationText}
-</conversation>
+/**
+ * Aggressively strips verbose blocks to maximize context density.
+ */
+function stripToMetadata(messages: any[]): any[] {
+    return messages.map((m) => {
+        if (m.role === "assistant") {
+            if (typeof m.content === "string") {
+                return m.content.length > 500
+                    ? {
+                          ...m,
+                          content:
+                              m.content.substring(0, 400) + "... [truncated]",
+                      }
+                    : m;
+            }
+            if (Array.isArray(m.content)) {
+                return {
+                    ...m,
+                    content: m.content
+                        .map((c: any) => {
+                            if (c.type === "thinking") return null;
+                            if (c.type === "text" && c.text.length > 800) {
+                                return {
+                                    ...c,
+                                    text:
+                                        c.text.substring(0, 400) +
+                                        "... [text truncated]",
+                                };
+                            }
+                            if (c.type === "toolCall") {
+                                const verbose = [
+                                    "read",
+                                    "write",
+                                    "ls",
+                                    "grep",
+                                    "find",
+                                    "bash",
+                                    "edit_file",
+                                    "read_file",
+                                    "list_directory",
+                                ];
+                                if (verbose.includes(c.name)) {
+                                    return {
+                                        ...c,
+                                        arguments: {
+                                            summary: `[${c.name} call stripped]`,
+                                        },
+                                    };
+                                }
+                            }
+                            return c;
+                        })
+                        .filter(Boolean),
+                };
+            }
+        }
 
-Use Markdown with clear headers (Goals, Active Files, Progress, Key Decisions, Next Steps).
-`;
-const MAX_SUMMARY_TOKENS = Math.floor(0.8 * 16384); // 13107
+        if (m.role === "toolResult") {
+            const verbose = [
+                "read",
+                "write",
+                "ls",
+                "grep",
+                "find",
+                "bash",
+                "edit_file",
+                "read_file",
+                "list_directory",
+            ];
+            if (verbose.includes(m.toolName)) {
+                return {
+                    ...m,
+                    content: [
+                        {
+                            type: "text",
+                            text: `[${m.toolName} output stripped - Success: ${!m.isError}]`,
+                        },
+                    ],
+                };
+            }
+        }
+
+        if (
+            m.role === "user" &&
+            typeof m.content === "string" &&
+            m.content.length > 1500
+        ) {
+            return {
+                ...m,
+                content:
+                    m.content.substring(0, 800) + "... [user prompt truncated]",
+            };
+        }
+
+        return m;
+    });
+}
 
 export function registerCompaction(pi: ExtensionAPI) {
     pi.on("session_before_compact", async (event, ctx) => {
@@ -45,37 +137,87 @@ export function registerCompaction(pi: ExtensionAPI) {
             previousSummary,
         } = preparation;
 
-        const conversationText = serializeConversation(
+        const filteredMessages = stripToMetadata(
             convertToLlm([...messagesToSummarize, ...turnPrefixMessages]),
         );
-        const previousContext = previousSummary
-            ? `\n\nPrevious session summary for context:\n${previousSummary}`
-            : "";
 
-        const messages: Context["messages"] = [
-            {
-                role: "user",
-                content: [
-                    {
-                        type: "text",
-                        text: `${summaryPrompt}${previousContext}\n\n${conversationText}`,
-                    },
-                ],
-                timestamp: Date.now(),
-            },
-        ];
+        // Character-based chunking to ensure every segment fits in the context window
+        const chunks: any[][] = [];
+        let currentChunk: any[] = [];
+        let currentSize = 0;
+
+        for (const msg of filteredMessages) {
+            const msgSize = JSON.stringify(msg).length;
+            if (
+                currentSize + msgSize > CHUNK_SIZE_CHARS &&
+                currentChunk.length > 0
+            ) {
+                chunks.push(currentChunk);
+                currentChunk = [];
+                currentSize = 0;
+            }
+            currentChunk.push(msg);
+            currentSize += msgSize;
+        }
+        if (currentChunk.length > 0) chunks.push(currentChunk);
+
+        const subModel = {
+            ...model,
+            id: FAST_MODEL_ID,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        } as Model<any>;
 
         try {
-            const response = await completeSimple(
-                model as Model<any>,
-                { messages },
-                { apiKey, maxTokens: MAX_SUMMARY_TOKENS, signal },
-            );
+            const subSummaryPromises = chunks.map((chunk, idx) => {
+                const segmentText = serializeConversation(chunk);
+                const messages: Context["messages"] = [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: SUB_SUMMARY_PROMPT.replace(
+                                    "${segmentText}",
+                                    segmentText,
+                                ),
+                            },
+                        ],
+                        timestamp: Date.now() + idx,
+                    },
+                ];
+                const timeoutSignal = AbortSignal.timeout(15000);
+                const combinedSignal = (AbortSignal as any).any
+                    ? (AbortSignal as any).any(
+                          [signal, timeoutSignal].filter(Boolean),
+                      )
+                    : timeoutSignal;
 
-            const summary = response.content
-                .filter((c: any) => c.type === "text")
-                .map((c: any) => c.text)
-                .join("\n");
+                return completeSimple(
+                    subModel,
+                    { messages },
+                    { apiKey, maxTokens: 1024, signal: combinedSignal },
+                )
+                    .then((res) => {
+                        const text = res.content
+                            .filter((c: any) => c.type === "text")
+                            .map((c: any) => c.text)
+                            .join("\n");
+                        return text.trim() || "[Segment summary empty]";
+                    })
+                    .catch(() => "[Segment processing failed]");
+            });
+
+            const summaries = await Promise.all(subSummaryPromises);
+
+            const previousContext = previousSummary
+                ? `## Previous History\n${previousSummary}\n\n`
+                : "";
+
+            const summary =
+                previousContext +
+                summaries
+                    .map((s, i) => `### Activity Segment ${i + 1}\n${s}`)
+                    .join("\n\n");
 
             if (!summary.trim()) return;
 
