@@ -123,16 +123,17 @@ export async function tokenizeBatch(
         return results;
     }
 
-    // Fetch uncached texts (sequential to avoid rate limits)
-    for (const { index, text } of uncached) {
-        try {
-            const count = await tokenize(model, text, apiKey);
-            results[index] = count;
-        } catch {
-            // Fall back to estimation
-            results[index] = estimateTokens(text);
-        }
-    }
+    // Fetch uncached texts in parallel
+    await Promise.all(
+        uncached.map(async ({ index, text }) => {
+            try {
+                results[index] = await tokenize(model, text, apiKey);
+            } catch {
+                // Fall back to estimation
+                results[index] = estimateTokens(text);
+            }
+        }),
+    );
 
     return results;
 }
@@ -194,8 +195,6 @@ export function extractText(message: any): string {
             for (const block of message.content || []) {
                 if (block.type === "text") {
                     parts.push(block.text || "");
-                } else if (block.type === "thinking") {
-                    parts.push(block.thinking || "");
                 } else if (block.type === "toolCall") {
                     parts.push(block.name || "");
                     parts.push(JSON.stringify(block.arguments || {}));

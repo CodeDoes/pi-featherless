@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { getConcurrencyUse, getModelClass } from "../models";
+import { getConcurrencyCost, getModelClass } from "../models";
 import { PROVIDER } from "./shared";
 
 interface ConcurrencyState {
@@ -31,7 +31,7 @@ export function handleApiError(error: any): void {
 function release(modelId: string): boolean {
     const modelClass = getModelClass(modelId);
     if (modelClass && state.totalCost > 0) {
-        const cost = getConcurrencyUse(modelClass);
+        const cost = getConcurrencyCost(modelClass);
         for (const [id, c] of Array.from(state.activeRequests)) {
             if (c === cost) {
                 state.activeRequests.delete(id);
@@ -56,7 +56,7 @@ export function registerConcurrencyTracking(pi: ExtensionAPI) {
         const modelClass = getModelClass(model.id);
         if (!modelClass) return;
 
-        const cost = getConcurrencyUse(modelClass);
+        const cost = getConcurrencyCost(modelClass);
         const requestId = `req_${++requestIdCounter}`;
         state.activeRequests.set(requestId, cost);
         state.totalCost += cost;

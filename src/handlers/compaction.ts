@@ -62,6 +62,7 @@ function stripToMetadata(messages: any[]): any[] {
                                     "edit_file",
                                     "read_file",
                                     "list_directory",
+                                    "swarm",
                                 ];
                                 if (verbose.includes(c.name)) {
                                     return {
@@ -90,6 +91,7 @@ function stripToMetadata(messages: any[]): any[] {
                 "edit_file",
                 "read_file",
                 "list_directory",
+                "swarm",
             ];
             if (verbose.includes(m.toolName)) {
                 return {
