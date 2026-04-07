@@ -18,14 +18,10 @@ import { registerProvider } from "./handlers/provider";
 import { registerConcurrencyTracking } from "./handlers/concurrency";
 import { registerContextTracking } from "./handlers/context";
 import { registerCompaction } from "./handlers/compaction";
-import { registerUnifiedSwarmHandler } from "./handlers/swarm-unified";
 
 export default function (pi: ExtensionAPI) {
     registerProvider(pi);
     registerConcurrencyTracking(pi);
     registerContextTracking(pi);
     registerCompaction(pi);
-    registerUnifiedSwarmHandler(pi);
-
-
 }
