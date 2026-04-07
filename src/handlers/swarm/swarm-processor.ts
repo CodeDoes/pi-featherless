@@ -79,7 +79,7 @@ export class SwarmProcessor {
         instruction: string,
     ): string {
         const contentPreview = fileContent.slice(0, this.config.maxFileChars);
-        return `File: ${filePath}\n\n\`\`\`\n${contentPreview}\n\`\`\`\n\n${instruction}`;
+        return `${instruction}\n\nHere is the content of ${filePath}:\n\n${contentPreview}`;
     }
 
     private async callLLM(

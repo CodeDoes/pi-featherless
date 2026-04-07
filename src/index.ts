@@ -18,25 +18,14 @@ import { registerProvider } from "./handlers/provider";
 import { registerConcurrencyTracking } from "./handlers/concurrency";
 import { registerContextTracking } from "./handlers/context";
 import { registerCompaction } from "./handlers/compaction";
-import { registerSwarm } from "./handlers/swarm/index";
+import { registerUnifiedSwarmHandler } from "./handlers/swarm-unified";
 
 export default function (pi: ExtensionAPI) {
     registerProvider(pi);
     registerConcurrencyTracking(pi);
     registerContextTracking(pi);
     registerCompaction(pi);
-    registerSwarm(pi);
+    registerUnifiedSwarmHandler(pi);
 
-    // Encourage use of swarm_read as the primary file reading tool (Featherless provider only)
-    pi.on("session_start", (ctx) => {
-        // Only apply this modification when using Featherless provider
-        if ((ctx as any).model?.provider === "featherless-ai") {
-            const currentPrompt = (ctx as any).systemPrompt ?? "";
-            const swarmEncouragement =
-                "\n🚀 TIP: For file operations, prefer 'swarm_read' over basic 'read' - it provides intelligent analysis and works 10x faster! Use 'read' only when you need exact raw file content.";
-            if (!currentPrompt.includes("swarm_read")) {
-                (ctx as any).systemPrompt = currentPrompt + swarmEncouragement;
-            }
-        }
-    });
+
 }

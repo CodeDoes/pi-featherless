@@ -18,9 +18,9 @@ const SWARM_TIMEOUT_MS = 20_000;
 const FILE_SIZE_WARNING = 100_000; // 100KB - warn about large files
 const MAX_SUMMARY_LENGTH = 1000; // Limit summary length to prevent context bloat (reduced from 1500)
 const TARGET_MAX_FILES_PER_CALL = 8; // Recommended max files to avoid compaction
-const CONTEXT_SAFETY_MARGIN = 0.7; // Leave 30% headroom for other conversation context
+const CONTEXT_SAFETY_MARGIN = 0.75; // Follow pi-mono's SAFETY_FACTOR exactly
 const REAL_CONTEXT_LIMIT = 32768; // 32k - actual model context limit
-const SAFE_CONTEXT_LIMIT = 22976; // 32k * 0.7 = 22976 (safe working limit)
+const SAFE_CONTEXT_LIMIT = 24576; // 32k * 0.75 = 24576 (matches pi-mono safety factor)
 
 // Compaction settings (following pi-mono pattern)
 const COMPACTION_SETTINGS = {
@@ -414,8 +414,8 @@ function registerSwarmRead(pi: ExtensionAPI) {
                                         // Process with LLM (we already validated model and apiKey exist)
                                         const instruction =
                                             instructions[i] ||
-                                            "Analyze this file and provide key insights";
-                                        const prompt = `File: ${filePath}\n\n\`\`\`\n${contentForProcessing}\n\`\`\`\n\n${instruction}`;
+                                            "Please analyze this file and provide key insights";
+                                        const prompt = `${instruction}\n\nHere is the content of ${filePath}:\n\n${contentForProcessing}`;
 
                                         logSwarmEvent(
                                             ctx,
@@ -708,32 +708,18 @@ function registerSwarmRead(pi: ExtensionAPI) {
                     if (useLLMSummarization && model && apiKey) {
                         // Use LLM for high-quality architectural analysis
                         try {
-                            const architecturePrompt = `
-**Codebase Architecture Analysis**
+                            const architecturePrompt = `Please analyze the architecture of this codebase based on the following files: ${files.join(', ')}.
 
-Files analyzed: ${files.join(', ')}
-
-Key findings from individual files:
+Here are the key findings from individual files:
 ${results.map((r, i) => `- ${files[i]}: ${r.split('\n')[0]}`).join('\n')}
 
-**Task**: Provide a concise architectural overview answering:
-1. What type of system is this? (1 sentence)
-2. What are the 3-5 key components? (bullet points)
-3. How do they interact? (1 paragraph)
-4. Any notable patterns or technologies? (bullet points)
+Please provide a concise architectural overview that includes:
+1. What type of system this is (in 1 sentence)
+2. The 3-5 key components (as bullet points)
+3. How they interact (in 1 paragraph)
+4. Any notable patterns or technologies (as bullet points)
 
-Format as:
-System Type: [brief description]
-
-Key Components:
-- Component: Purpose
-
-Architecture:
-[concise paragraph]
-
-Patterns/Tech:
-- Pattern/tech and its role
-`;
+Please format your response clearly and concisely.`;
 
                             logSwarmEvent(ctx, "Generating LLM-powered architectural summary", undefined, {
                                 files: files.length,
@@ -766,32 +752,18 @@ Patterns/Tech:
                     if (useLLMSummarization && model && apiKey) {
                         // Use LLM for high-quality architectural analysis
                         try {
-                            const architecturePrompt = `
-**Codebase Architecture Analysis**
+                            const architecturePrompt = `Please analyze the architecture of this codebase based on the following files: ${files.join(', ')}.
 
-Files analyzed: ${files.join(', ')}
-
-Key findings from individual files:
+Here are the key findings from individual files:
 ${results.map((r, i) => `- ${files[i]}: ${r.split('\n')[0]}`).join('\n')}
 
-**Task**: Provide a concise architectural overview answering:
-1. What type of system is this? (1 sentence)
-2. What are the 3-5 key components? (bullet points)
-3. How do they interact? (1 paragraph)
-4. Any notable patterns or technologies? (bullet points)
+Please provide a concise architectural overview that includes:
+1. What type of system this is (in 1 sentence)
+2. The 3-5 key components (as bullet points)
+3. How they interact (in 1 paragraph)
+4. Any notable patterns or technologies (as bullet points)
 
-Format as:
-System Type: [brief description]
-
-Key Components:
-- Component: Purpose
-
-Architecture:
-[concise paragraph]
-
-Patterns/Tech:
-- Pattern/tech and its role
-`;
+Please format your response clearly and concisely.`;
 
                             logSwarmEvent(ctx, "Generating LLM-powered architectural summary", undefined, {
                                 files: files.length,
