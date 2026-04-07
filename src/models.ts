@@ -40,7 +40,7 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
         cost: { input: 1.0, output: 1.0, cacheRead: 0.5, cacheWrite: 1.0 },
     },
     "glm5-754b": {
-        context_limit: 32768,
+        context_limit: 48000, // Plan allows 48K total (input + output), max output is 32K
         concurrency_use: 4,
         cost: { input: 2.0, output: 2.0, cacheRead: 1.0, cacheWrite: 2.0 },
     },
@@ -180,14 +180,16 @@ export function getModelConfig(entry: ModelEntry) {
     const mc = MODEL_CLASSES[entry.model_class];
     if (!mc) throw new Error(`Unknown model_class: ${entry.model_class}`);
 
-    // Apply safety factor to prevent overflow from chars/4 underestimation
+    // Apply safety factor to prevent overflow from chars/4 underestimation.
+    // Pi's chars/4 heuristic underestimates tokens by ~27% on average,
+    // so we report a smaller context window to trigger compaction early.
     const safeContextWindow = Math.floor(mc.context_limit * SAFETY_FACTOR);
 
     return {
         id: entry.id,
         name: entry.id,
         reasoning: entry.reasoning ?? false,
-        contextWindow: mc.context_limit, // Use real context window for UI display
+        contextWindow: safeContextWindow, // Reduced window to prevent overflow
         maxTokens: mc.context_limit, // Keep real limit for output
         input: ["text"] as ("text" | "image")[],
         cost: mc.cost,
