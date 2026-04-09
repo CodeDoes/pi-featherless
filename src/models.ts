@@ -44,6 +44,11 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
         concurrency_use: 4,
         cost: { input: 2.0, output: 2.0, cacheRead: 1.0, cacheWrite: 2.0 },
     },
+    "glm51-744b": {
+        context_limit: 48000,
+        concurrency_use: 4,
+        cost: { input: 2.0, output: 2.0, cacheRead: 1.0, cacheWrite: 2.0 },
+    },
     "minimax-m25": {
         context_limit: 32768,
         concurrency_use: 4,
@@ -107,6 +112,7 @@ export const MODELS: ModelEntry[] = [
     { id: "zai-org/GLM-4.7-Flash", model_class: "glm47-flash", tool_use: true },
     { id: "zai-org/GLM-4.7", model_class: "glm47-357b", tool_use: true },
     { id: "zai-org/GLM-5", model_class: "glm5-754b", tool_use: true },
+    { id: "zai-org/GLM-5.1", model_class: "glm51-744b", tool_use: true },
 
     // MiniMax
     {
