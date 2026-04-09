@@ -212,9 +212,6 @@ export const MODELS: ModelEntry[] = [
         model_class: "nemotron3-120b",
         tool_use: true,
     },
-    {
-        id: "featherless-ai/QRWKV-72B",
-        model_class: "qrwkv-72b-32k",
         tool_use: true,
     },
     {
