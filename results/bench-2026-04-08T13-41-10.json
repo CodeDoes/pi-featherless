@@ -1,0 +1,135 @@
+{
+  "timestamp": "2026-04-08T13:41:10.474Z",
+  "config": {
+    "models": [
+      {
+        "id": "--config",
+        "label": "  config"
+      },
+      {
+        "id": "models-batch1.json",
+        "label": "models batch1.json"
+      }
+    ]
+  },
+  "results": [
+    {
+      "model": "--config",
+      "label": "  config",
+      "params": {
+        "temperature": 0.7,
+        "top_p": 1,
+        "max_tokens": 500
+      },
+      "scenarios": [
+        {
+          "scenario": "hello",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `--config` does not exist.",
+          "durationMs": 831
+        },
+        {
+          "scenario": "read",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `--config` does not exist.",
+          "durationMs": 590
+        },
+        {
+          "scenario": "json",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `--config` does not exist.",
+          "durationMs": 688
+        },
+        {
+          "scenario": "selfcontrol",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `--config` does not exist.",
+          "durationMs": 594
+        },
+        {
+          "scenario": "pipeline",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `--config` does not exist.",
+          "durationMs": 574
+        },
+        {
+          "scenario": "calc",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `--config` does not exist.",
+          "durationMs": 610
+        }
+      ],
+      "overall": {
+        "passed": 0,
+        "total": 6,
+        "percentage": 0,
+        "avgDurationMs": 648
+      }
+    },
+    {
+      "model": "models-batch1.json",
+      "label": "models batch1.json",
+      "params": {
+        "temperature": 0.7,
+        "top_p": 1,
+        "max_tokens": 500
+      },
+      "scenarios": [
+        {
+          "scenario": "hello",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `models-batch1.json` does not exist.",
+          "durationMs": 604
+        },
+        {
+          "scenario": "read",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `models-batch1.json` does not exist.",
+          "durationMs": 618
+        },
+        {
+          "scenario": "json",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `models-batch1.json` does not exist.",
+          "durationMs": 605
+        },
+        {
+          "scenario": "selfcontrol",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `models-batch1.json` does not exist.",
+          "durationMs": 610
+        },
+        {
+          "scenario": "pipeline",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `models-batch1.json` does not exist.",
+          "durationMs": 598
+        },
+        {
+          "scenario": "calc",
+          "passed": false,
+          "toolCalls": [],
+          "error": "404 The model `models-batch1.json` does not exist.",
+          "durationMs": 625
+        }
+      ],
+      "overall": {
+        "passed": 0,
+        "total": 6,
+        "percentage": 0,
+        "avgDurationMs": 610
+      }
+    }
+  ]
+}
