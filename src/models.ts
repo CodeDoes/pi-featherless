@@ -56,6 +56,11 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
         concurrency_cost: 4,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     },
+    "glm5-754b": {
+        context_limit: 32768,
+        concurrency_cost: 4,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
     "slf-dstl-1.5b": {
         context_limit: 32768,
         concurrency_cost: 1,
@@ -157,6 +162,7 @@ export const MODELS: ModelEntry[] = [
     { id: "driaforall/Tiny-Agent-a-1.5B", model_class: "tiny-agent-1.5b", tool_use: true },
     { id: "zai-org/GLM-4.7", model_class: "glm47-357b", tool_use: true },
     { id: "zai-org/GLM-5", model_class: "glm51-754b", tool_use: true },
+    { id: "zai-org/GLM-5", model_class: "glm5-754b", tool_use: true },
     {
         id: "MiniMaxAI/MiniMax-M2.5",
         model_class: "minimax-m25",
