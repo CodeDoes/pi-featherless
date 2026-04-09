@@ -1,0 +1,8 @@
+{
+  "skills": [
+    "-skills/audit-quick/SKILL.md"
+  ],
+  "extensions": [
+    "-extensions/typecheck.ts"
+  ]
+}

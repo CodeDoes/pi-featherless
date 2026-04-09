@@ -14,7 +14,13 @@
         "bench:full": "npx tsx bench/run-terminal-bench.ts"
     },
     "keywords": [
-        "pi-package"
+        "pi",
+        "pi-package",
+        "coding-agent",
+        "extension",
+        "provider",
+        "featherless",
+        "llm"
     ],
     "author": "",
     "license": "ISC",
@@ -26,7 +32,10 @@
     },
     "pi": {
         "extensions": [
-            "./src/index.ts"
+            "extensions/**/*.ts"
+        ],
+        "skills": [
+            "skills/**/SKILL.md"
         ]
     },
     "dependencies": {
