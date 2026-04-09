@@ -51,9 +51,19 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
         concurrency_cost: 4,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     },
-    "glm5-754b": {
+    "glm51-754b": {
         context_limit: 32768,
         concurrency_cost: 4,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
+    "slf-dstl-1.5b": {
+        context_limit: 32768,
+        concurrency_cost: 1,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
+    "tiny-agent-1.5b": {
+        context_limit: 32768,
+        concurrency_cost: 1,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     },
     "minimax-m25": {
@@ -102,6 +112,21 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
         concurrency_cost: 4,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     },
+    "nemotron3-120b": {
+        context_limit: 32768,
+        concurrency_cost: 4,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
+    "qrwkv-72b-32k": {
+        context_limit: 65536,
+        concurrency_cost: 1,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
+    "qrwkv-32b-32k": {
+        context_limit: 32768,
+        concurrency_cost: 1,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
 };
 
 export interface ModelEntry {
@@ -128,8 +153,10 @@ export const MODELS: ModelEntry[] = [
         tool_use: true,
     },
     { id: "zai-org/GLM-4.7-Flash", model_class: "glm47-flash", tool_use: true },
+    { id: "RyanYr/slf-dstl_Q2.5-1.5B-It_tooluse_SFT", model_class: "slf-dstl-1.5b", tool_use: true },
+    { id: "driaforall/Tiny-Agent-a-1.5B", model_class: "tiny-agent-1.5b", tool_use: true },
     { id: "zai-org/GLM-4.7", model_class: "glm47-357b", tool_use: true },
-    { id: "zai-org/GLM-5", model_class: "glm5-754b", tool_use: true },
+    { id: "zai-org/GLM-5", model_class: "glm51-754b", tool_use: true },
     {
         id: "MiniMaxAI/MiniMax-M2.5",
         model_class: "minimax-m25",
@@ -172,6 +199,21 @@ export const MODELS: ModelEntry[] = [
         id: "Qwen/Qwen3-Coder-480B-A35B-Instruct",
         model_class: "qwen3-coder-480b",
         reasoning: true,
+        tool_use: true,
+    },
+    {
+        id: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+        model_class: "nemotron3-120b",
+        tool_use: true,
+    },
+    {
+        id: "featherless-ai/QRWKV-72B",
+        model_class: "qrwkv-72b-32k",
+        tool_use: true,
+    },
+    {
+        id: "recursal/RWKV6Qwen2.5-32B-QwQ-Preview",
+        model_class: "qrwkv-32b-32k",
         tool_use: true,
     },
 ];
