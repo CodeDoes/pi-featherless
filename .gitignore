@@ -6,3 +6,6 @@ demos/compaction-logs/
 jobs/
 models.json
 model_classes.json
+
+# External repos
+benchmark-suite/
