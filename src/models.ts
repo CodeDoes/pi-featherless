@@ -95,11 +95,6 @@ const MODEL_CLASSES: Record<string, ModelClass> = {
         concurrency_use: 4,
         cost: { input: 1.5, output: 1.5, cacheRead: 0.75, cacheWrite: 1.5 },
     },
-    "delphi-7b": {
-        context_limit: 32768,
-        concurrency_use: 1,
-        cost: { input: 0.1, output: 0.1, cacheRead: 0.05, cacheWrite: 0.1 },
-    },
 };
 
 export interface ModelEntry {
@@ -152,9 +147,6 @@ export const MODELS: ModelEntry[] = [
         model_class: "mistral-24b-2503",
         tool_use: true,
     },
-
-    // Delphi
-    { id: "thaddickson/Delphi-7B-v2", model_class: "delphi-7b" },
 
     // Qwen3 — officially supported for tool calling
     {
